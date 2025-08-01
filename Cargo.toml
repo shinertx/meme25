@@ -1,0 +1,26 @@
+[workspace]
+members = [
+  "shared-models",
+  "executor",
+  "signer",
+  "strategy_factory",
+  "portfolio_manager",
+  "market_data_gateway",
+  "position_manager"
+]
+resolver = "2"
+
+default-members = ["executor"]
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "z"
+
+[workspace.dependencies]
+anyhow = "1.0"
+tokio = { version = "1.0", features = ["full"] }
+tracing = "0.1"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+chrono = { version = "0.4", features = ["serde"] }
