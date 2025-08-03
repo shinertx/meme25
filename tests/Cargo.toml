@@ -1,0 +1,20 @@
+[package]
+name = "tests"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "integration_test"
+path = "src/integration_test.rs"
+
+[dependencies]
+shared-models = { path = "../shared-models" }
+executor = { path = "../executor" }
+tokio = { version = "1.0", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["json", "env-filter"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+redis = { version = "0.24", features = ["tokio-comp", "streams"] }
+anyhow = "1.0"
+uuid = { version = "1.0", features = ["v4"] }

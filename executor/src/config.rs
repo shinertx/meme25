@@ -1,5 +1,6 @@
 use serde::Deserialize;
 use std::env;
+use shared_models::error::{ModelError, Result};
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
@@ -28,6 +29,7 @@ pub struct Config {
     pub max_slippage_percent: f64,
     pub min_liquidity_usd: f64,
     pub target_annual_return_percent: f64,
+    pub metrics_port: Option<u16>,
 }
 
 impl Config {
@@ -58,10 +60,52 @@ impl Config {
             max_slippage_percent: env::var("MAX_SLIPPAGE")?.parse().unwrap_or(2.0),
             min_liquidity_usd: env::var("MIN_LIQUIDITY")?.parse().unwrap_or(10000.0),
             target_annual_return_percent: env::var("TARGET_ANNUAL_RETURN")?.parse().unwrap_or(500.0),
+            metrics_port: env::var("METRICS_PORT").ok().and_then(|p| p.parse().ok()),
         })
+    }
+
+    pub fn validate(self) -> Result<Self> {
+        macro_rules! ensure { 
+            ($cond:expr, $msg:literal) => { 
+                if !$cond { 
+                    return Err(ModelError::Config($msg.into())); 
+                } 
+            }; 
+        }
+        
+        ensure!(!self.redis_url.is_empty(), "redis_url missing");
+        ensure!(!self.database_url.is_empty(), "database_url missing");
+        ensure!(self.max_position_size_percent > 0.0, "max_position_size must be > 0");
+        ensure!(self.max_daily_drawdown_percent > 0.0 && self.max_daily_drawdown_percent < 100.0, "drawdown must be in (0,100) range");
+        ensure!(self.initial_capital_usd > 0.0, "initial_capital must be > 0");
+        ensure!(self.max_portfolio_size_usd > self.initial_capital_usd, "max_portfolio_size must be > initial_capital");
+        
+        if let Some(port) = self.metrics_port {
+            ensure!(port > 1024, "metrics_port must be > 1024");
+        }
+        
+        Ok(self)
     }
 }
 
+use once_cell::sync::OnceCell;
+
+static CONFIG_CELL: OnceCell<Config> = OnceCell::new();
+
+pub fn get_config() -> Result<&'static Config> {
+    CONFIG_CELL.get_or_try_init(|| {
+        Config::from_env()
+            .map_err(|e| ModelError::Config(format!("Environment variable error: {}", e)))
+            .and_then(|config| config.validate())
+    })
+}
+
+// For backward compatibility with existing code that uses CONFIG
 lazy_static::lazy_static! {
-    pub static ref CONFIG: Config = Config::from_env().expect("Failed to load configuration");
+    pub static ref CONFIG: Config = {
+        get_config().unwrap_or_else(|e| {
+            eprintln!("FATAL: Configuration error: {}", e);
+            std::process::exit(1);
+        }).clone()
+    };
 }

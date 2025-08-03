@@ -1,0 +1,119 @@
+name: MemeSnipe v25 CI/CD
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: meme_snipe_v25_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+      
+      redis:
+        image: redis:7
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        components: clippy, rustfmt
+    
+    - name: Cache Cargo dependencies
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/bin/
+          ~/.cargo/registry/index/
+          ~/.cargo/registry/cache/
+          ~/.cargo/git/db/
+          target/
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+    
+    - name: Check formatting
+      run: cargo fmt --all -- --check
+    
+    - name: Run Clippy
+      run: cargo clippy --workspace --all-features -- -D warnings
+    
+    - name: Build
+      run: cargo build --workspace --all-features
+    
+    - name: Run unit tests
+      run: cargo test --workspace --all-features
+      env:
+        DATABASE_URL: postgres://postgres:postgres@localhost:5432/meme_snipe_v25_test
+        REDIS_URL: redis://localhost:6379
+    
+    - name: Integration Tests
+      run: cargo test --workspace --all-features -- --ignored
+      env:
+        DATABASE_URL: postgres://postgres:postgres@localhost:5432/meme_snipe_v25_test
+        REDIS_URL: redis://localhost:6379
+
+  security:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+    
+    - name: Install cargo-audit
+      run: cargo install cargo-audit
+    
+    - name: Security audit
+      run: cargo audit
+
+  docker:
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+    
+    - name: Build executor image
+      run: docker build -f executor/Dockerfile -t memesnipe-executor:latest .
+    
+    - name: Build signer image
+      run: docker build -f signer/Dockerfile -t memesnipe-signer:latest .
+    
+    - name: Test Docker Compose
+      run: |
+        cp .env.example .env
+        docker compose build
+        docker compose up -d
+        sleep 30
+        docker compose ps
+        docker compose logs
+        docker compose down

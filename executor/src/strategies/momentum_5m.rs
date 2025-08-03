@@ -78,9 +78,15 @@ impl Strategy for Momentum5m {
                     }
                 }
                 
-                // Calculate momentum
-                let oldest = history.front().unwrap();
-                let newest = history.back().unwrap();
+                // TODO: [FIX_1] Remove panic points
+                let oldest = match history.front() {
+                    Some(data) => data,
+                    None => return Ok(StrategyAction::Hold), // Not enough data
+                };
+                let newest = match history.back() {
+                    Some(data) => data,
+                    None => return Ok(StrategyAction::Hold), // Not enough data
+                };
                 
                 let price_change = (newest.1 - oldest.1) / oldest.1;
                 let avg_volume: f64 = history.iter().map(|(_, _, v)| v).sum::<f64>() / history.len() as f64;

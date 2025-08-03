@@ -1,27 +1,20 @@
-mod config;
-mod database;
-mod executor;
-mod jito_client;
-mod jupiter;
-mod signer_client;
-mod strategies;
-mod risk_manager;
-mod metrics;
-
-use crate::config::CONFIG;
-use anyhow::Result;
-use database::Database;
-use executor::MasterExecutor;
-use risk_manager::RiskManager;
-use metrics::MetricsServer;
-use std::sync::Arc;
-use tracing::{info, level_filters::LevelFilter};
+use executor::{
+    config::get_config,
+    event_loop::EventLoop,
+    circuit_breaker::CircuitBreaker,
+    metrics::Metrics,
+};
+use shared_models::error::Result;
+use tracing::{info, error, level_filters::LevelFilter};
 use tracing_subscriber::EnvFilter;
-use axum::{routing::get, Router};
-use std::net::SocketAddr;
+use std::sync::Arc;
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Load environment variables from .env file if it exists
+    dotenvy::dotenv().ok();
+    
+    // Initialize logging
     let filter = EnvFilter::builder()
         .with_default_directive(LevelFilter::INFO.into())
         .from_env_lossy();
@@ -30,47 +23,44 @@ async fn main() -> Result<()> {
         .json()
         .init();
 
-    info!("🚀 Starting MemeSnipe v25 Executor - Wintermute Grade");
+    info!("🚀 Starting MemeSnipe v25 Executor - Production Grade");
 
-    // Initialize database
-    let db = Arc::new(Database::new(&CONFIG.database_url).await?);
-    
-    // Initialize risk manager
-    let risk_manager = Arc::new(RiskManager::new(
-        CONFIG.initial_capital_usd,
-        CONFIG.max_daily_drawdown_percent,
-        CONFIG.portfolio_stop_loss_percent,
-    ));
-    
-    // Start metrics server
-    let metrics_server = MetricsServer::new();
-    let metrics_handle = tokio::spawn(async move {
-        let app = Router::new()
-            .route("/metrics", get(metrics_server.handle_metrics))
-            .route("/health", get(|| async { "OK" }));
-        
-        let addr = SocketAddr::from(([0, 0, 0, 0], 9184));
-        info!("Metrics server listening on {}", addr);
-        
-        axum::Server::bind(&addr)
-            .serve(app.into_make_service())
-            .await
-            .unwrap();
-    });
+    // Load and validate configuration
+    let config = get_config()?;
+    info!("Configuration loaded successfully");
 
-    // Initialize and run executor
-    let mut master_executor = MasterExecutor::new(db.clone(), risk_manager.clone()).await?;
+    // Initialize metrics
+    let metrics = Metrics::new(config.metrics_port)?;
+    info!("Metrics initialized on port {:?}", config.metrics_port);
+
+    // Initialize Redis client for circuit breaker
+    let redis_client = redis::Client::open(config.redis_url.clone())
+        .map_err(|e| shared_models::error::ModelError::Redis(format!("Failed to create Redis client: {}", e)))?;
+
+    // Initialize circuit breaker
+    let circuit_breaker = Arc::new(CircuitBreaker::new(config.clone(), redis_client));
+    info!("Circuit breaker initialized");
+
+    // Initialize strategy registry using the helper function
+    let mut strategy_registry = executor::strategy_registry::initialize_strategies();
+    info!("Strategies registered: {}", strategy_registry.strategy_count());
+
+    // Initialize event loop
+    let mut event_loop = EventLoop::new(
+        &config.redis_url,
+        strategy_registry,
+    )?;
+    info!("Event loop initialized");
+
+    // Initialize the event loop
+    event_loop.initialize().await?;
+
+    info!("🎯 MemeSnipe v25 Executor ready - Starting event processing");
     
-    // Run main execution loop
-    tokio::select! {
-        result = master_executor.run() => {
-            if let Err(e) = result {
-                tracing::error!("Executor failed: {}", e);
-            }
-        }
-        _ = tokio::signal::ctrl_c() => {
-            info!("Received shutdown signal");
-        }
+    // Start the main event loop
+    if let Err(e) = event_loop.run().await {
+        error!("Event loop failed: {}", e);
+        return Err(e);
     }
 
     Ok(())

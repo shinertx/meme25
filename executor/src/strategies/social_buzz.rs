@@ -133,30 +133,41 @@ impl Strategy for SocialBuzz {
                    latest.engagement > self.min_engagement_score &&
                    latest.sentiment > 0.5 {
                     
+                    // Extract all data we need
+                    let token_addr = mention.token_address.clone();
+                    let mention_timestamp = mention.timestamp;
+                    let latest_sentiment = latest.sentiment;
+                    let latest_engagement = latest.engagement;
+                    let latest_influencer_score = latest.influencer_score;
+                    
+                    // Now we can do the mutable borrow
+                    self.last_trade.insert(token_addr.clone(), mention_timestamp);
+                    
+                    // Get strategy ID after the mutable borrow
+                    let strategy_id = self.id();
+                    
                     info!(
-                        strategy = self.id(),
-                        token = %mention.token_address,
+                        strategy = %strategy_id,
+                        token = %token_addr,
                         buzz_ratio = format!("{:.2}x", buzz_ratio),
-                        sentiment = latest.sentiment,
-                        engagement = latest.engagement,
+                        sentiment = latest_sentiment,
+                        engagement = latest_engagement,
                         "SOCIAL BUZZ BUY signal detected"
                     );
-                    
-                    self.last_trade.insert(mention.token_address.clone(), mention.timestamp);
                     
                     let confidence = ((buzz_score / 10.0) * 0.8).min(0.9);
                     
                     let order = OrderDetails {
-                        token_address: mention.token_address.clone(),
-                        symbol: format!("MEME_{}", &mention.token_address[..6]),
+                        token_address: token_addr.clone(),
+                        symbol: format!("MEME_{}", &token_addr[..6]),
                         suggested_size_usd: 45.0,
                         confidence,
                         side: Side::Long,
                         strategy_metadata: HashMap::from([
                             ("buzz_ratio".to_string(), serde_json::json!(buzz_ratio)),
-                            ("sentiment".to_string(), serde_json::json!(latest.sentiment)),
-                            ("engagement".to_string(), serde_json::json!(latest.engagement)),
-                            ("influencer_score".to_string(), serde_json::json!(latest.influencer_score)),
+                            ("sentiment".to_string(), serde_json::json!(latest_sentiment)),
+                            ("engagement".to_string(), serde_json::json!(latest_engagement)),
+                            ("influencer_score".to_string(), serde_json::json!(latest_influencer_score)),
                         ]),
                         risk_metrics: RiskMetrics {
                             position_size_pct: 0.018,
@@ -177,41 +188,6 @@ impl Strategy for SocialBuzz {
             }
             MarketEvent::FarcasterRaw(cast) => {
                 // Process Farcaster casts similarly
-            }
-            _ => {}
-        }
-        
-        Ok(StrategyAction::Hold)
-    }
-    
-    fn get_state(&self) -> Value {
-        serde_json::json!({
-            "lookback_minutes": self.lookback_minutes,
-            "std_dev_threshold": self.std_dev_threshold,
-            "tracked_tokens": self.mention_history.len(),
-            "recent_trades": self.last_trade.len(),
-        })
-    }
-}
-            MarketEvent::FarcasterRaw(cast) => {
-                // Similar processing for Farcaster casts
-                let solana_address_pattern = regex::Regex::new(r"[1-9A-HJ-NP-Za-km-z]{32,44}").unwrap();
-                
-                if let Some(addr_match) = solana_address_pattern.find(&cast.text) {
-                    let token_address = addr_match.as_str();
-                    
-                    let synthetic_mention = shared_models::SocialMention {
-                        token_address: token_address.to_string(),
-                        source: "farcaster".to_string(),
-                        sentiment: if cast.text.contains("bullish") || cast.text.contains("gem") { 0.7 } else { 0.5 },
-                        engagement_score: (cast.author_followers as f64 / 1000.0).min(1.0),
-                        influencer_score: (cast.author_followers as f64 / 5000.0).min(1.0),
-                        mentions_1h: 1,
-                        timestamp: shared_models::DateTime::from_timestamp(cast.timestamp, 0).unwrap_or_else(chrono::Utc::now),
-                    };
-                    
-                    return self.on_event(&MarketEvent::Social(synthetic_mention)).await;
-                }
             }
             _ => {}
         }

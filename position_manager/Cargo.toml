@@ -8,7 +8,7 @@ anyhow        = "1"
 serde         = { version = "1", features = ["derive"] }
 redis         = { version = "0.24", features = ["tokio-comp"] }
 sqlx          = { version = "0.7", features = ["runtime-tokio-rustls", "postgres", "uuid"] }
-tokio         = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
+tokio         = { version = "1.0", features = ["macros", "rt-multi-thread", "time"] }
 tracing       = "0.1"
 shared-models = { path = "../shared-models" }
 chrono        = "0.4"

@@ -3,8 +3,9 @@ use async_tungstenite::{tokio::connect_async, tungstenite::Message};
 use redis::{aio::MultiplexedConnection, AsyncCommands};
 use serde::Deserialize;
 use shared_models::{MarketEvent, PriceTick, EventType};
-use tokio::time::{sleep, Duration};
-use tracing::{info, warn};
+use tokio::time::{sleep, Duration, interval};
+use tracing::{info, warn, error};
+use futures_util::{StreamExt, SinkExt};
 
 #[derive(Debug, Deserialize)]
 struct HeliusSlotTick {

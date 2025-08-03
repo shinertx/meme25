@@ -12,6 +12,30 @@ pub mod rug_pull_sniffer;
 
 // Re-export Strategy trait and types
 pub use shared_models::{Strategy, MarketEvent, StrategyAction, OrderDetails, EventType};
+use crate::strategy_registry::{StrategyTrait, StrategyRegistry};
+use std::collections::HashMap;
+
+// RC3 Addendum: Strategy instantiation helper (Closes #6)
+pub fn default_strategies() -> HashMap<String, Box<dyn StrategyTrait>> {
+    let mut strategies: HashMap<String, Box<dyn StrategyTrait>> = HashMap::new();
+    
+    // Note: These would be actual strategy implementations
+    // For now, using placeholder strategies from strategy_registry
+    strategies.insert("momentum_5m".into(), Box::new(crate::strategy_registry::MomentumStrategy::new()));
+    strategies.insert("mean_reversion_1h".into(), Box::new(crate::strategy_registry::MeanReversionStrategy::new()));
+    strategies.insert("breakout".into(), Box::new(crate::strategy_registry::ArbitrageStrategy::new()));
+    
+    // Add more strategies as they are implemented
+    // strategies.insert("cross_chain_arb".into(), Box::new(CrossChainArbStrategy::new()));
+    // strategies.insert("volume_spike".into(), Box::new(VolumeSpikeStrategy::new()));
+    // strategies.insert("social_buzz".into(), Box::new(SocialBuzzStrategy::new()));
+    // strategies.insert("whale_watch".into(), Box::new(WhaleWatchStrategy::new()));
+    // strategies.insert("multi_signal".into(), Box::new(MultiSignalStrategy::new()));
+    // strategies.insert("degen_mode".into(), Box::new(DegenModeStrategy::new()));
+    // strategies.insert("mean_reversion_daily".into(), Box::new(MeanReversionDailyStrategy::new()));
+    
+    strategies
+}
 
 // Strategy registration helper
 #[macro_export]

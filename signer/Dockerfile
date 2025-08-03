@@ -15,17 +15,8 @@ RUN apt-get update && apt-get install -y \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /app/target/release/signer /usr/local/bin/
-EXPOSE 8989
-CMD ["signer"]
-    ca-certificates \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
-
 WORKDIR /app
-
-COPY --from=builder /app/signer/target/release/signer /usr/local/bin/signer
+COPY --from=builder /app/target/release/signer /usr/local/bin/signer
 
 EXPOSE 8989
-
 CMD ["signer"]

@@ -38,7 +38,7 @@ async fn main() -> Result<()> {
     info!("🔐 Starting Signer Service v25 - Production Grade");
 
     let keypair_filename = env::var("WALLET_KEYPAIR_FILENAME")
-        .expect("WALLET_KEYPAIR_FILENAME must be set");
+        .map_err(|_| anyhow!("WALLET_KEYPAIR_FILENAME environment variable must be set"))?;
     let keypair_path = format!("/app/wallet/{}", keypair_filename);
     
     // Read keypair with secure memory handling

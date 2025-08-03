@@ -2,6 +2,15 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use chrono::{DateTime, Utc};
 
+pub mod error;
+pub use error::{ModelError, Result};
+
+// Top-level event wrapper
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum Event {
+    Market(MarketEvent),
+}
+
 // Event Types
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum EventType {
@@ -267,6 +276,20 @@ pub enum TradeMode {
 }
 
 // Strategy Types
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum StrategyType {
+    Momentum,
+    MeanReversion,
+    Arbitrage,
+    BreakoutReversion,
+    VolumeAnomaly,
+    SocialSentiment,
+    CrossChainArb,
+    LiquidityMining,
+    TrendFollowing,
+    EventDriven,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OrderDetails {
     pub token_address: String,
@@ -399,6 +422,25 @@ pub struct BacktestResult {
 use async_trait::async_trait;
 use std::collections::HashSet;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RiskLevel {
+    Low,
+    Medium,
+    High,
+    Critical,
+}
+
+impl std::fmt::Display for RiskLevel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RiskLevel::Low => write!(f, "Low"),
+            RiskLevel::Medium => write!(f, "Medium"),
+            RiskLevel::High => write!(f, "High"),
+            RiskLevel::Critical => write!(f, "Critical"),
+        }
+    }
+}
+
 #[async_trait]
 pub trait Strategy: Send + Sync {
     fn id(&self) -> &'static str;
@@ -406,4 +448,69 @@ pub trait Strategy: Send + Sync {
     async fn init(&mut self, params: &serde_json::Value) -> anyhow::Result<()>;
     async fn on_event(&mut self, event: &MarketEvent) -> anyhow::Result<StrategyAction>;
     fn get_state(&self) -> serde_json::Value;
+}
+
+// Trading and Database Models
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Trade {
+    pub id: String,
+    pub strategy_id: String,
+    pub symbol: String,
+    pub side: Side,
+    pub quantity: f64,
+    pub price: f64,
+    pub timestamp: DateTime<Utc>,
+    pub profit_loss: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RiskEvent {
+    pub id: String,
+    pub event_type: RiskEventType,
+    pub severity: RiskLevel,
+    pub description: String,
+    pub timestamp: DateTime<Utc>,
+    pub strategy_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CapitalAllocation {
+    pub id: String,
+    pub strategy_id: String,
+    pub allocated_capital: f64,
+    pub timestamp: DateTime<Utc>,
+    pub notes: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum RiskEventType {
+    PositionSizeExceeded,
+    DailyLossLimit,
+    PortfolioExposure,
+    StrategyFailure,
+    DataQuality,
+}
+
+impl RiskEventType {
+    pub fn to_string(&self) -> &'static str {
+        match self {
+            RiskEventType::PositionSizeExceeded => "position_size_exceeded",
+            RiskEventType::DailyLossLimit => "daily_loss_limit",
+            RiskEventType::PortfolioExposure => "portfolio_exposure",
+            RiskEventType::StrategyFailure => "strategy_failure",
+            RiskEventType::DataQuality => "data_quality",
+        }
+    }
+}
+
+// Portfolio-level risk metrics
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PortfolioRiskMetrics {
+    pub portfolio_value: f64,
+    pub daily_pnl: f64,
+    pub max_drawdown: f64,
+    pub exposure_percentage: f64,
+    pub var_95: f64,
+    pub position_count: u32,
+    pub risk_score: RiskLevel,
 }

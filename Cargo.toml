@@ -2,11 +2,13 @@
 members = [
   "shared-models",
   "executor",
-  "signer",
+  "signer",              # NEW – on‑chain tx signing gRPC
   "strategy_factory",
   "portfolio_manager",
   "market_data_gateway",
-  "position_manager"
+  "position_manager",
+  "backtest_engine",     # upgraded (see §10)
+  "tests",               # integration‑test harness
 ]
 resolver = "2"
 
@@ -24,3 +26,8 @@ tracing = "0.1"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1.6", features = ["v4"] }
+url = "2.5"
+
+[patch.crates-io]
+tokio = { git = "https://github.com/tokio-rs/tokio", branch = "master" }

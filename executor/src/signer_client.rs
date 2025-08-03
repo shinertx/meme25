@@ -1,21 +1,27 @@
-use crate::config::CONFIG;
 use anyhow::{anyhow, Result};
 use reqwest::Client;
-use shared_models::{SignRequest, SignResponse};
+use shared_models::{SignRequest, SignResponse, error::ModelError};
 use std::time::Duration;
 use tracing::{debug, error};
+use once_cell::sync::OnceCell;
 
-static CLIENT: once_cell::sync::Lazy<Client> = once_cell::sync::Lazy::new(|| {
-    Client::builder()
-        .timeout(Duration::from_secs(30))
-        .build()
-        .expect("Failed to create HTTP client")
-});
+static CLIENT: OnceCell<Client> = OnceCell::new();
+
+fn get_client() -> Result<&'static Client> {
+    CLIENT.get_or_try_init(|| {
+        Client::builder()
+            .timeout(Duration::from_secs(30))
+            .build()
+            .map_err(|e| ModelError::Network(format!("Failed to create HTTP client: {}", e)))
+    }).map_err(|e| anyhow!("HTTP client initialization failed: {}", e))
+}
 
 pub async fn get_pubkey() -> Result<String> {
+    use crate::config::CONFIG;
     debug!("Getting wallet pubkey from signer service");
     
-    let response = CLIENT
+    let client = get_client()?;
+    let response = client
         .get(&format!("{}/pubkey", CONFIG.signer_url))
         .send()
         .await?;
@@ -34,13 +40,15 @@ pub async fn get_pubkey() -> Result<String> {
 }
 
 pub async fn sign_transaction(transaction_b64: &str) -> Result<String> {
+    use crate::config::CONFIG;
     debug!("Sending transaction to signer service");
     
     let request = SignRequest {
         transaction_b64: transaction_b64.to_string(),
     };
     
-    let response = CLIENT
+    let client = get_client()?;
+    let response = client
         .post(&format!("{}/sign", CONFIG.signer_url))
         .json(&request)
         .send()

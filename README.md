@@ -1,10 +1,88 @@
-# MemeSnipe v25 - Production-Ready Autonomous Trading System
+# MemeSnipe v25 — Autonomous Memecoin Trading System
 
-## Overview
+## 🎯 **What This Project Does**
 
-MemeSnipe v25 is a production-grade, fully autonomous cryptocurrency trading system designed to compound $200 into significant returns through intelligent strategy allocation and risk management. The system employs 10 distinct trading strategies that evolve through genetic algorithms and allocate capital based on real-time performance.
+**MemeSnipe v25** is a production-grade, autonomous trading system designed to turn $200 into $1M by trading Solana memecoins. It operates as a sophisticated ensemble of 10 parallel trading strategies that collectively analyze real-time market data and execute trades with institutional-grade risk management.
 
-## 🚀 Quick Start
+### **Core Functionality**
+
+The system implements a **multi-strategy ensemble architecture** where:
+
+1. **Real-Time Data Ingestion**
+   - Connects to Helius WebSocket for live Solana blockchain data
+   - Monitors price movements, volume spikes, and on-chain activity
+   - Processes events with <500ms latency requirement
+
+2. **10 Parallel Trading Strategies**
+   - **Momentum Strategies**: Capture trending moves (5min, daily timeframes)
+   - **Mean Reversion**: Exploit overextended price movements
+   - **Event-Driven**: React to volume spikes and social sentiment
+   - **Smart Money**: Follow whale wallets and sophisticated traders
+   - **Arbitrage**: Cross-venue and cross-chain opportunities
+   - Each strategy operates independently but within strict risk limits
+
+3. **Ensemble Decision Making**
+   - All strategies analyze the same market events simultaneously
+   - Each can generate trade signals based on their unique edge
+   - Risk manager aggregates exposure across all strategies
+   - Natural selection: winning strategies get more capital allocation
+
+4. **Risk Management**
+   - Portfolio-wide 10% drawdown circuit breaker
+   - 2% maximum position size per trade
+   - 10% maximum allocation per strategy
+   - Real-time P&L tracking and exposure monitoring
+
+5. **Execution Infrastructure**
+   - Jupiter aggregator integration for best price execution
+   - Jito bundle submission for MEV protection
+   - Slippage modeling and liquidity analysis
+   - Paper trading mode for strategy validation
+
+### **Technical Architecture**
+
+```
+Market Data (Helius) → Redis Streams → Event Loop → 10 Strategies → Risk Manager → Execution
+                                           ↓
+                                     Metrics/Monitoring
+                                           ↓
+                                     PostgreSQL/Grafana
+```
+
+### **Key Features**
+
+- **Autonomous Operation**: Runs 24/7 without manual intervention
+- **Multi-Strategy Ensemble**: Adapts to different market conditions
+- **Production-Grade**: Comprehensive error handling, monitoring, circuit breakers
+- **Backtesting Engine**: Validate strategies on historical data
+- **Paper Trading**: Test with real market data before risking capital
+- **Observability**: Prometheus metrics, Grafana dashboards, detailed logging
+
+### **Performance Goals**
+
+- Target: Transform $200 → $1M through compounding
+- Required: Massive return over 1 Month compunding
+- Minimum Sharpe Ratio: 1.5 for live trading
+- Win Rate Targets: >55% momentum, >65% mean reversion
+
+---
+
+## Table of Contents
+
+1. [Prerequisites](#prerequisites)
+2. [Project Structure](#project-structure)
+3. [Environment Setup](#environment-setup)
+4. [Database Setup](#database-setup)
+5. [Running the System](#running-the-system)
+6. [Development](#development)
+7. [Testing](#testing)
+8. [Monitoring](#monitoring)
+9. [Troubleshooting](#troubleshooting)
+
+---
+
+## Prerequisites
+// ...existing code...
 
 1. **Clone and Configure**:
    ```bash
@@ -229,7 +307,7 @@ The system continuously evolves through:
 
 ## Performance Targets
 
-- **Target Growth**: $200 → $1000+ over 6 months
+- **Target Growth**: $200 → $1000000+ over 1 month
 - **Minimum Sharpe**: >1.5 for strategy promotion
 - **Max Drawdown**: <10% daily, <20% monthly
 - **Win Rate**: >55% across all strategies
