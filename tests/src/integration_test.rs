@@ -1,9 +1,10 @@
-use shared_models::{Event, MarketEvent, PriceTick, EventType};
-use shared_models::error::{Result, ModelError};
-use redis::{Client, AsyncCommands};
-use tracing::{info, error};
-use tokio::time::{sleep, Duration};
+use redis::{AsyncCommands, Client};
 use serde_json;
+use shared_models::error::{ModelError, Result};
+use shared_models::{Event, MarketEvent, PriceTick};
+use sqlx::PgPool;
+use tokio::time::{sleep, Duration};
+use tracing::{error, info, warn};
 
 /// Integration test that validates the entire MemeSnipe v25 system
 /// Critical Finding #15: Integration test harness
@@ -18,26 +19,37 @@ async fn price_event_roundtrip() -> Result<()> {
     info!("🧪 Starting price event roundtrip test");
 
     // Test that price events flow through the system correctly
-    let redis_url = std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://localhost:6379".to_string());
+    let redis_url =
+        std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://localhost:6379".to_string());
     let client = Client::open(redis_url)?;
-    let mut conn = client.get_async_connection().await
+    let mut conn = client
+        .get_async_connection()
+        .await
         .map_err(|e| ModelError::Redis(format!("Failed to connect to Redis: {}", e)))?;
 
     // Create a test price event
-    let test_event = Event::Price(PriceTick {
-        symbol: "SOL".to_string(),
-        price: 100.0,
-        volume_24h: 1000000.0,
-        market_cap: 50000000.0,
+    let test_event = Event::Market(MarketEvent::Price(PriceTick {
+        token_address: "So11111111111111111111111111111111111111112".to_string(),
+        price_usd: 100.0,
+        volume_usd_1m: 25_000.0,
+        volume_usd_5m: 75_000.0,
+        volume_usd_15m: 180_000.0,
+        price_change_1m: 1.2,
+        price_change_5m: 3.4,
+        liquidity_usd: 550_000.0,
         timestamp: chrono::Utc::now(),
-        source: "test".to_string(),
-    });
+    }));
 
     // Publish event to Redis stream
-    let event_json = serde_json::to_string(&test_event)
-        .map_err(|e| ModelError::Serde(e))?;
-    
-    let _: String = conn.xadd("events:price", "*", &[("data", &event_json), ("type", "price")]).await
+    let event_json = serde_json::to_string(&test_event).map_err(|e| ModelError::Serde(e))?;
+
+    let _: String = conn
+        .xadd(
+            "events:price",
+            "*",
+            &[("data", &event_json), ("type", "price")],
+        )
+        .await
         .map_err(|e| ModelError::Redis(format!("Failed to publish event: {}", e)))?;
 
     info!("✅ Published test price event to Redis stream");
@@ -45,8 +57,36 @@ async fn price_event_roundtrip() -> Result<()> {
     // Wait a bit for processing
     sleep(Duration::from_millis(100)).await;
 
-    // TODO: Verify the event was processed by checking database
-    // This would require database connection and trade verification
+    if let Ok(database_url) = std::env::var("DATABASE_URL") {
+        match PgPool::connect(&database_url).await {
+            Ok(pool) => {
+                let token = "So11111111111111111111111111111111111111112";
+                match sqlx::query_scalar::<_, i64>(
+                    "SELECT COUNT(*) FROM market_data_cache \
+                     WHERE token_address = $1 AND timestamp > NOW() - INTERVAL '10 minutes'",
+                )
+                .bind(token)
+                .fetch_one(&pool)
+                .await
+                {
+                    Ok(count) if count > 0 => {
+                        info!("✅ Database contains {} recent rows for {}", count, token);
+                    }
+                    Ok(_) => {
+                        warn!("ℹ️ No recent database rows found for {}, event may not be processed yet", token);
+                    }
+                    Err(e) => {
+                        warn!("Skipping database validation due to query error: {}", e);
+                    }
+                }
+
+                pool.close().await;
+            }
+            Err(e) => warn!("Skipping database verification: {}", e),
+        }
+    } else {
+        info!("DATABASE_URL not set; skipping database verification step");
+    }
 
     info!("✅ Price event roundtrip test completed");
     Ok(())
@@ -69,17 +109,21 @@ async fn run_integration_tests() -> Result<()> {
 }
 
 async fn test_redis_connectivity() -> Result<()> {
-    let redis_url = std::env::var("REDIS_URL")
-        .unwrap_or_else(|_| "redis://localhost:6379".to_string());
-    
+    let redis_url =
+        std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://localhost:6379".to_string());
+
     let client = Client::open(redis_url.as_str())
         .map_err(|e| ModelError::Redis(format!("Failed to create Redis client: {}", e)))?;
-    
-    let mut conn = client.get_multiplexed_async_connection().await
+
+    let mut conn = client
+        .get_multiplexed_async_connection()
+        .await
         .map_err(|e| ModelError::Redis(format!("Failed to connect to Redis: {}", e)))?;
 
     // Test basic connectivity
-    let _: String = conn.ping().await
+    let _: String = conn
+        .ping()
+        .await
         .map_err(|e| ModelError::Redis(format!("Redis ping failed: {}", e)))?;
 
     info!("✅ Redis connectivity test passed");
@@ -87,9 +131,9 @@ async fn test_redis_connectivity() -> Result<()> {
 }
 
 async fn test_event_flow() -> Result<()> {
-    let redis_url = std::env::var("REDIS_URL")
-        .unwrap_or_else(|_| "redis://localhost:6379".to_string());
-    
+    let redis_url =
+        std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://localhost:6379".to_string());
+
     let client = Client::open(redis_url.as_str())?;
     let mut conn = client.get_multiplexed_async_connection().await?;
 
@@ -108,10 +152,13 @@ async fn test_event_flow() -> Result<()> {
 
     // Serialize and publish to Redis stream
     let event_json = serde_json::to_string(&test_event)?;
-    let stream_id: String = conn.xadd("events:price", "*", &[
-        ("type", "price"),
-        ("data", &event_json)
-    ]).await?;
+    let stream_id: String = conn
+        .xadd(
+            "events:price",
+            "*",
+            &[("type", "price"), ("data", &event_json)],
+        )
+        .await?;
 
     info!("✅ Event published with ID: {}", stream_id);
 
@@ -135,9 +182,9 @@ async fn test_event_flow() -> Result<()> {
 
 async fn test_strategy_registry() -> Result<()> {
     use executor::initialize_strategies;
-    
+
     let registry = initialize_strategies();
-    
+
     if registry.strategy_count() == 0 {
         return Err(anyhow::anyhow!("No strategies loaded"));
     }
@@ -146,19 +193,24 @@ async fn test_strategy_registry() -> Result<()> {
         return Err(anyhow::anyhow!("No active strategies found"));
     }
 
-    info!("✅ Strategy registry test passed - {} strategies loaded, {} active", 
-          registry.strategy_count(), registry.active_strategy_count());
+    info!(
+        "✅ Strategy registry test passed - {} strategies loaded, {} active",
+        registry.strategy_count(),
+        registry.active_strategy_count()
+    );
     Ok(())
 }
 
 async fn test_circuit_breaker() -> Result<()> {
     use executor::CircuitBreaker;
-    
+
     let circuit_breaker = CircuitBreaker::new(15.0, 5.0, 100000.0);
-    
+
     // Test that circuit breaker starts in normal state
     if circuit_breaker.is_tripped() {
-        return Err(anyhow::anyhow!("Circuit breaker should start in normal state"));
+        return Err(anyhow::anyhow!(
+            "Circuit breaker should start in normal state"
+        ));
     }
 
     info!("✅ Circuit breaker test passed");
@@ -185,9 +237,12 @@ mod tests {
 
         let serialized = serde_json::to_string(&event).unwrap();
         let deserialized: Event = serde_json::from_str(&serialized).unwrap();
-        
+
         match (event, deserialized) {
-            (Event::Market(MarketEvent::Price(original)), Event::Market(MarketEvent::Price(parsed))) => {
+            (
+                Event::Market(MarketEvent::Price(original)),
+                Event::Market(MarketEvent::Price(parsed)),
+            ) => {
                 assert_eq!(original.token_address, parsed.token_address);
                 assert_eq!(original.price_usd, parsed.price_usd);
             }

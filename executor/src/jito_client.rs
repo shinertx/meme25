@@ -1,6 +1,6 @@
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
 use reqwest::Client;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct JitoBundle {
@@ -40,12 +40,13 @@ impl JitoClient {
         }
 
         let url = format!("{}/bundles", self.base_url);
-        
-        let response = self.client
-            .post(&url)
-            .json(&bundle)
-            .send()
-            .await?;
+
+        let mut request = self.client.post(&url);
+        if let Some(auth) = &self.auth_keypair {
+            request = request.header("x-block-engine-identity", auth);
+        }
+
+        let response = request.json(&bundle).send().await?;
 
         if response.status().is_success() {
             let bundle_response: JitoBundleResponse = response.json().await?;
@@ -63,15 +64,20 @@ impl JitoClient {
         }
 
         let url = format!("{}/bundles/{}", self.base_url, bundle_id);
-        
-        let response = self.client
-            .get(&url)
-            .send()
-            .await?;
+
+        let mut request = self.client.get(&url);
+        if let Some(auth) = &self.auth_keypair {
+            request = request.header("x-block-engine-identity", auth);
+        }
+
+        let response = request.send().await?;
 
         if response.status().is_success() {
             let status_response: serde_json::Value = response.json().await?;
-            Ok(status_response["status"].as_str().unwrap_or("unknown").to_string())
+            Ok(status_response["status"]
+                .as_str()
+                .unwrap_or("unknown")
+                .to_string())
         } else {
             anyhow::bail!("Failed to get bundle status");
         }

@@ -1,10 +1,10 @@
 use axum::{http::StatusCode, response::Json, routing::get, Router};
-use serde_json::{json, Value};
-use shared_models::error::{Result, ModelError};
-use std::sync::Arc;
-use tracing::{error, debug};
 use redis::Client;
+use serde_json::{json, Value};
+use shared_models::error::{ModelError, Result};
 use sqlx::{PgPool, Row};
+use std::sync::Arc;
+use tracing::{debug, error};
 
 pub struct HealthChecker {
     redis_client: Client,
@@ -20,29 +20,48 @@ impl HealthChecker {
     }
 
     pub async fn check_redis(&self) -> Result<bool> {
-        let mut conn = self.redis_client.get_multiplexed_async_connection().await
-            .map_err(|e| ModelError::Redis(format!("Failed to connect to Redis: {}", e)))?;
-        
-        // Simple ping test
-        let _: String = redis::cmd("PING")
-            .query_async(&mut conn)
+        let mut conn = self
+            .redis_client
+            .get_multiplexed_async_connection()
             .await
-            .map_err(|e| ModelError::Redis(format!("Redis PING failed: {}", e)))?;
-        
-        Ok(true)
+            .map_err(|e| {
+                error!("Failed to connect to Redis: {}", e);
+                ModelError::Redis(format!("Failed to connect to Redis: {}", e))
+            })?;
+
+        match redis::cmd("PING").query_async::<_, String>(&mut conn).await {
+            Ok(_) => {
+                debug!("Redis health check succeeded");
+                Ok(true)
+            }
+            Err(e) => {
+                error!("Redis PING failed: {}", e);
+                Err(ModelError::Redis(format!("Redis PING failed: {}", e)))
+            }
+        }
     }
 
     pub async fn check_database(&self) -> Result<bool> {
         if let Some(pool) = &self.db_pool {
-            let row = sqlx::query("SELECT 1 as test")
-                .fetch_one(pool)
-                .await
-                .map_err(ModelError::Db)?;
-            
-            let test_value: i32 = row.try_get("test")
-                .map_err(ModelError::Db)?;
-            
-            Ok(test_value == 1)
+            match sqlx::query("SELECT 1 as test").fetch_one(pool).await {
+                Ok(row) => {
+                    let test_value: i32 = row.try_get("test").map_err(ModelError::Db)?;
+                    if test_value == 1 {
+                        debug!("Database health check succeeded");
+                        Ok(true)
+                    } else {
+                        error!(
+                            "Database health check returned unexpected value: {}",
+                            test_value
+                        );
+                        Ok(false)
+                    }
+                }
+                Err(e) => {
+                    error!("Database health query failed: {}", e);
+                    Err(ModelError::Db(e))
+                }
+            }
         } else {
             Ok(false) // No database configured
         }
@@ -63,7 +82,8 @@ impl HealthChecker {
                 true
             }
             Ok(false) | Err(_) => {
-                status["checks"]["redis"] = json!({"status": "unhealthy", "message": "Connection failed"});
+                status["checks"]["redis"] =
+                    json!({"status": "unhealthy", "message": "Connection failed"});
                 false
             }
         };
@@ -75,11 +95,13 @@ impl HealthChecker {
                 true
             }
             Ok(false) => {
-                status["checks"]["database"] = json!({"status": "not_configured", "message": "Database not configured"});
+                status["checks"]["database"] =
+                    json!({"status": "not_configured", "message": "Database not configured"});
                 true // Not configured is considered healthy
             }
             Err(e) => {
-                status["checks"]["database"] = json!({"status": "unhealthy", "message": format!("Connection failed: {}", e)});
+                status["checks"]["database"] =
+                    json!({"status": "unhealthy", "message": format!("Connection failed: {}", e)});
                 false
             }
         };
@@ -99,7 +121,7 @@ pub async fn health_handler(
     axum::extract::State(health_checker): axum::extract::State<Arc<HealthChecker>>,
 ) -> Result<Json<Value>, StatusCode> {
     let status = health_checker.get_health_status().await;
-    
+
     if status["status"] == "healthy" {
         Ok(Json(status))
     } else {
@@ -112,7 +134,7 @@ pub async fn readiness_handler(
 ) -> Result<Json<Value>, StatusCode> {
     // For readiness, we check if all critical services are available
     let redis_ok = health_checker.check_redis().await.unwrap_or(false);
-    
+
     let status = json!({
         "service": "executor",
         "ready": redis_ok,

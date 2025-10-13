@@ -3,7 +3,7 @@ version: '3.8'
 services:
   redis:
     ports:
-      - "6379:6379"
+      - "6381:6379"
       
   postgres:
     ports:
@@ -11,7 +11,7 @@ services:
       
   prometheus:
     ports:
-      - "9090:9090"
+      - "9092:9090"
       
   grafana:
     ports:

@@ -1,9 +1,43 @@
-FROM rust:1.75 as builder
-WORKDIR /app
-COPY ./shared-models /app/shared-models
-COPY ./strategy_factory /app/strategy_factory
-RUN cargo build -p strategy_factory --release
+# syntax=docker/dockerfile:1.6
 
-FROM gcr.io/distroless/cc
-COPY --from=builder /app/target/release/strategy_factory /usr/local/bin/strategy_factory
-ENTRYPOINT ["strategy_factory"]
+FROM rustlang/rust:nightly-slim AS base
+WORKDIR /app
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends pkg-config libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+RUN cargo install cargo-chef --locked
+
+FROM base AS planner
+COPY Cargo.toml Cargo.lock ./
+COPY backtest_engine ./backtest_engine
+COPY executor ./executor
+COPY market_data_gateway ./market_data_gateway
+COPY portfolio_manager ./portfolio_manager
+COPY position_manager ./position_manager
+COPY shared-models ./shared-models
+COPY signer ./signer
+COPY strategy_factory ./strategy_factory
+COPY tests ./tests
+RUN cargo chef prepare --recipe-path recipe.json
+
+FROM base AS builder
+COPY --from=planner /app/recipe.json recipe.json
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    --mount=type=cache,target=/app/target \
+    cargo chef cook --release --recipe-path recipe.json
+
+COPY . .
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    --mount=type=cache,target=/app/target \
+    cargo build --release --locked --package strategy_factory --bin strategy_factory \
+    && cp /app/target/release/strategy_factory /app/strategy_factory
+
+FROM debian:bookworm-slim AS runtime
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+COPY --from=builder /app/strategy_factory /usr/local/bin/strategy_factory
+ENTRYPOINT ["/usr/local/bin/strategy_factory"]

@@ -2,7 +2,7 @@
 members = [
   "shared-models",
   "executor",
-  "signer",              # NEW – on‑chain tx signing gRPC
+  # "signer",              # Excluded: incompatible zeroize version with sqlx rustls
   "strategy_factory",
   "portfolio_manager",
   "market_data_gateway",

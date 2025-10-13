@@ -1,12 +1,14 @@
-use anyhow::{Result, Context};
+use anyhow::{Context, Result};
+use shared_models::{CapitalAllocation, RiskEvent, StrategyPerformance, Trade};
 use sqlx::{PgPool, Row};
-use shared_models::{Trade, StrategyPerformance, RiskEvent, CapitalAllocation};
 use std::collections::HashMap;
 use tokio::sync::RwLock;
 
 pub enum Database {
-    Live { pool: PgPool },
-    Mock { 
+    Live {
+        pool: PgPool,
+    },
+    Mock {
         trades: RwLock<Vec<Trade>>,
         performance: RwLock<HashMap<String, StrategyPerformance>>,
         allocations: RwLock<Vec<CapitalAllocation>>,
@@ -16,7 +18,9 @@ pub enum Database {
 impl Database {
     pub async fn new(database_url: &str) -> Result<Self> {
         // Check if we're in paper trading mode
-        if std::env::var("PAPER_TRADING_MODE").unwrap_or_default() == "true" {
+        let paper_flag = std::env::var("PAPER_TRADING_MODE").unwrap_or_else(|_| "true".into());
+        let paper_mode = matches!(paper_flag.as_str(), "1" | "true" | "TRUE");
+        if paper_mode {
             tracing::info!("📝 Using MockDatabase for paper trading mode");
             return Ok(Self::Mock {
                 trades: RwLock::new(Vec::new()),
@@ -24,11 +28,11 @@ impl Database {
                 allocations: RwLock::new(Vec::new()),
             });
         }
-        
+
         let pool = PgPool::connect(database_url)
             .await
             .with_context(|| format!("Failed to connect to database: {}", database_url))?;
-        
+
         tracing::info!("🗄️ Connected to live PostgreSQL database");
         Ok(Self::Live { pool })
     }
@@ -57,7 +61,12 @@ impl Database {
             Database::Mock { trades, .. } => {
                 let mut trades_guard = trades.write().await;
                 trades_guard.push(trade.clone());
-                tracing::info!("📝 Mock saved trade: {} {} {}", trade.side, trade.quantity, trade.symbol);
+                tracing::info!(
+                    "📝 Mock saved trade: {} {} {}",
+                    trade.side,
+                    trade.quantity,
+                    trade.symbol
+                );
             }
         }
         Ok(())
@@ -100,10 +109,16 @@ impl Database {
                 .await
                 .with_context(|| "Failed to save strategy performance")?;
             }
-            Database::Mock { performance: perf_map, .. } => {
+            Database::Mock {
+                performance: perf_map,
+                ..
+            } => {
                 let mut perf_guard = perf_map.write().await;
                 perf_guard.insert(performance.strategy_id.clone(), performance.clone());
-                tracing::info!("📝 Mock saved performance for strategy: {}", performance.strategy_id);
+                tracing::info!(
+                    "📝 Mock saved performance for strategy: {}",
+                    performance.strategy_id
+                );
             }
         }
         Ok(())
@@ -156,7 +171,11 @@ impl Database {
             Database::Mock { allocations, .. } => {
                 let mut alloc_guard = allocations.write().await;
                 alloc_guard.push(allocation.clone());
-                tracing::info!("📝 Mock saved allocation: {} for {}", allocation.allocated_capital, allocation.strategy_id);
+                tracing::info!(
+                    "📝 Mock saved allocation: {} for {}",
+                    allocation.allocated_capital,
+                    allocation.strategy_id
+                );
             }
         }
         Ok(())
@@ -172,14 +191,14 @@ impl Database {
                     WHERE strategy_id = $1 
                     ORDER BY timestamp DESC 
                     LIMIT $2
-                    "#
+                    "#,
                 )
                 .bind(strategy_id)
                 .bind(limit)
                 .fetch_all(pool)
                 .await
                 .with_context(|| "Failed to fetch recent trades")?;
-                
+
                 // Convert rows to Trade objects
                 let mut trades = Vec::new();
                 for row in rows {
@@ -189,7 +208,7 @@ impl Database {
                         "Short" => shared_models::Side::Short,
                         _ => shared_models::Side::Long, // Default fallback
                     };
-                    
+
                     let trade = Trade {
                         id: row.get("id"),
                         strategy_id: row.get("strategy_id"),

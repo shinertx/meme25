@@ -51,9 +51,16 @@ if ! command -v docker &> /dev/null; then
     exit 1
 fi
 
-if ! command -v docker-compose &> /dev/null; then
+if ! command -v docker-compose &> /dev/null && ! command -v docker compose &> /dev/null; then
     echo -e "${RED}Docker Compose is not installed${NC}"
     exit 1
+fi
+
+# Use docker compose if available, otherwise fallback to docker-compose
+if command -v docker compose &> /dev/null; then
+    COMPOSE_CMD="docker compose"
+else
+    COMPOSE_CMD="docker-compose"
 fi
 
 # Create shared directory
@@ -71,10 +78,12 @@ echo -e "${GREEN}✅ Prerequisites check passed${NC}"
 
 # Build and start services
 echo -e "${YELLOW}Building Docker images...${NC}"
-docker-compose build --no-cache
+export DOCKER_BUILDKIT=${DOCKER_BUILDKIT:-1}
+export COMPOSE_DOCKER_CLI_BUILD=${COMPOSE_DOCKER_CLI_BUILD:-1}
+$COMPOSE_CMD build --pull
 
 echo -e "${YELLOW}Starting services...${NC}"
-docker-compose up -d
+$COMPOSE_CMD up -d
 
 # Wait for services to be healthy
 echo -e "${YELLOW}Waiting for services to be ready...${NC}"
@@ -84,14 +93,14 @@ sleep 30
 echo -e "${YELLOW}Checking service health...${NC}"
 
 # Check Redis
-if docker-compose exec redis redis-cli ping | grep -q "PONG"; then
+if $COMPOSE_CMD exec redis redis-cli ping | grep -q "PONG"; then
     echo -e "${GREEN}✅ Redis is healthy${NC}"
 else
     echo -e "${RED}❌ Redis is not responding${NC}"
 fi
 
 # Check PostgreSQL
-if docker-compose exec postgres pg_isready -U postgres | grep -q "accepting connections"; then
+if $COMPOSE_CMD exec postgres pg_isready -U postgres | grep -q "accepting connections"; then
     echo -e "${GREEN}✅ PostgreSQL is healthy${NC}"
 else
     echo -e "${RED}❌ PostgreSQL is not responding${NC}"

@@ -1,13 +1,13 @@
-use shared_models::error::{Result, ModelError};
-use tracing::{info, warn, debug, error};
-use tokio::net::{TcpListener, TcpStream};
-use tokio_tungstenite::{accept_async, tungstenite::Message, WebSocketStream};
-use tokio::sync::{broadcast, RwLock};
-use std::collections::HashMap;
-use std::sync::Arc;
-use serde::{Serialize, Deserialize};
 use chrono::{DateTime, Utc};
 use futures_util::{SinkExt, StreamExt};
+use serde::{Deserialize, Serialize};
+use shared_models::error::{ModelError, Result};
+use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::{broadcast, RwLock};
+use tokio_tungstenite::{accept_async, tungstenite::Message, WebSocketStream};
+use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -17,7 +17,7 @@ pub enum WebSocketMessageType {
     Unsubscribe,
     GetStatus,
     GetHistory,
-    
+
     // Server -> Client
     Portfolio,
     Strategy,
@@ -114,7 +114,7 @@ pub struct TradeUpdate {
 pub struct AlertUpdate {
     pub timestamp: DateTime<Utc>,
     pub alert_id: String,
-    pub level: String, // "Info", "Warning", "Critical"
+    pub level: String,    // "Info", "Warning", "Critical"
     pub category: String, // "Risk", "Performance", "System", "Market"
     pub message: String,
     pub strategy_id: Option<String>,
@@ -155,7 +155,7 @@ struct ClientConnection {
 pub struct WebSocketServer {
     listener: Option<TcpListener>,
     clients: Arc<RwLock<HashMap<String, ClientConnection>>>,
-    
+
     // Broadcast channels for real-time updates
     portfolio_tx: broadcast::Sender<PortfolioUpdate>,
     strategy_tx: broadcast::Sender<StrategyUpdate>,
@@ -165,13 +165,13 @@ pub struct WebSocketServer {
     alert_tx: broadcast::Sender<AlertUpdate>,
     opportunity_tx: broadcast::Sender<OpportunityUpdate>,
     circuit_breaker_tx: broadcast::Sender<CircuitBreakerUpdate>,
-    
+
     // Configuration
     port: u16,
     max_clients: usize,
     heartbeat_interval_seconds: u64,
     client_timeout_seconds: u64,
-    
+
     // Metrics
     total_connections: u64,
     messages_sent: u64,
@@ -212,18 +212,19 @@ impl WebSocketServer {
 
     pub async fn start(&mut self) -> Result<()> {
         let addr = format!("127.0.0.1:{}", self.port);
-        let listener = TcpListener::bind(&addr).await
+        let listener = TcpListener::bind(&addr)
+            .await
             .map_err(|e| ModelError::Network(format!("Failed to bind WebSocket server: {}", e)))?;
         info!("WebSocket server listening on {}", addr);
-        
+
         self.listener = Some(listener);
-        
+
         // Start heartbeat task
         self.start_heartbeat_task().await;
-        
+
         // Start connection handler
         self.handle_connections().await?;
-        
+
         Ok(())
     }
 
@@ -261,7 +262,9 @@ impl WebSocketServer {
                         alert_rx,
                         opportunity_rx,
                         circuit_breaker_rx,
-                    ).await {
+                    )
+                    .await
+                    {
                         error!("Error handling client {}: {}", addr, e);
                     }
                 });
@@ -282,21 +285,25 @@ impl WebSocketServer {
         mut opportunity_rx: broadcast::Receiver<OpportunityUpdate>,
         mut circuit_breaker_rx: broadcast::Receiver<CircuitBreakerUpdate>,
     ) -> Result<()> {
-        let ws_stream = accept_async(stream).await
-            .map_err(|e| ModelError::Network(format!("Failed to accept WebSocket connection: {}", e)))?;
+        let ws_stream = accept_async(stream).await.map_err(|e| {
+            ModelError::Network(format!("Failed to accept WebSocket connection: {}", e))
+        })?;
         let client_id = Uuid::new_v4().to_string();
-        
+
         let (mut ws_sender, mut ws_receiver) = ws_stream.split();
-        
+
         // Create client connection
         let client_connection = ClientConnection {
             subscriptions: HashMap::new(),
             last_activity: Utc::now(),
         };
-        
+
         // Store client
-        clients.write().await.insert(client_id.clone(), client_connection);
-        
+        clients
+            .write()
+            .await
+            .insert(client_id.clone(), client_connection);
+
         // Send welcome message
         let welcome_msg = WebSocketMessage {
             id: Uuid::new_v4().to_string(),
@@ -310,11 +317,11 @@ impl WebSocketServer {
             }),
             subscription_id: None,
         };
-        
+
         if let Ok(msg_text) = serde_json::to_string(&welcome_msg) {
             let _ = ws_sender.send(Message::Text(msg_text)).await;
         }
-        
+
         // Handle client messages and broadcasts
         loop {
             tokio::select! {
@@ -356,7 +363,7 @@ impl WebSocketServer {
                         None => break,
                     }
                 },
-                
+
                 // Handle portfolio updates
                 portfolio_update = portfolio_rx.recv() => {
                     if let Ok(update) = portfolio_update {
@@ -370,7 +377,7 @@ impl WebSocketServer {
                         ).await;
                     }
                 },
-                
+
                 // Handle strategy updates
                 strategy_update = strategy_rx.recv() => {
                     if let Ok(update) = strategy_update {
@@ -384,7 +391,7 @@ impl WebSocketServer {
                         ).await;
                     }
                 },
-                
+
                 // Handle risk updates
                 risk_update = risk_rx.recv() => {
                     if let Ok(update) = risk_update {
@@ -398,7 +405,7 @@ impl WebSocketServer {
                         ).await;
                     }
                 },
-                
+
                 // Handle market updates
                 market_update = market_rx.recv() => {
                     if let Ok(update) = market_update {
@@ -412,7 +419,7 @@ impl WebSocketServer {
                         ).await;
                     }
                 },
-                
+
                 // Handle trade updates
                 trade_update = trade_rx.recv() => {
                     if let Ok(update) = trade_update {
@@ -426,7 +433,7 @@ impl WebSocketServer {
                         ).await;
                     }
                 },
-                
+
                 // Handle alert updates
                 alert_update = alert_rx.recv() => {
                     if let Ok(update) = alert_update {
@@ -440,7 +447,7 @@ impl WebSocketServer {
                         ).await;
                     }
                 },
-                
+
                 // Handle opportunity updates
                 opportunity_update = opportunity_rx.recv() => {
                     if let Ok(update) = opportunity_update {
@@ -454,7 +461,7 @@ impl WebSocketServer {
                         ).await;
                     }
                 },
-                
+
                 // Handle circuit breaker updates
                 circuit_breaker_update = circuit_breaker_rx.recv() => {
                     if let Ok(update) = circuit_breaker_update {
@@ -470,10 +477,10 @@ impl WebSocketServer {
                 },
             }
         }
-        
+
         // Remove client on disconnect
         clients.write().await.remove(&client_id);
-        
+
         Ok(())
     }
 
@@ -483,20 +490,28 @@ impl WebSocketServer {
         clients: &Arc<RwLock<HashMap<String, ClientConnection>>>,
     ) -> Result<()> {
         debug!("Received message from client {}: {}", client_id, message);
-        
+
         match serde_json::from_str::<WebSocketMessage>(message) {
             Ok(ws_msg) => {
                 match ws_msg.message_type {
                     WebSocketMessageType::Subscribe => {
-                        if let Ok(sub_req) = serde_json::from_value::<SubscriptionRequest>(ws_msg.data) {
+                        if let Ok(sub_req) =
+                            serde_json::from_value::<SubscriptionRequest>(ws_msg.data)
+                        {
                             // Update client subscriptions
                             if let Some(client) = clients.write().await.get_mut(client_id) {
-                                client.subscriptions.insert(sub_req.subscription_id.clone(), sub_req.channels.clone());
+                                client.subscriptions.insert(
+                                    sub_req.subscription_id.clone(),
+                                    sub_req.channels.clone(),
+                                );
                                 client.last_activity = Utc::now();
-                                info!("Client {} subscribed to channels: {:?}", client_id, sub_req.channels);
+                                info!(
+                                    "Client {} subscribed to channels: {:?}",
+                                    client_id, sub_req.channels
+                                );
                             }
                         }
-                    },
+                    }
                     WebSocketMessageType::Unsubscribe => {
                         if let Ok(sub_id) = serde_json::from_value::<String>(ws_msg.data) {
                             if let Some(client) = clients.write().await.get_mut(client_id) {
@@ -505,7 +520,7 @@ impl WebSocketServer {
                                 info!("Client {} unsubscribed from {}", client_id, sub_id);
                             }
                         }
-                    },
+                    }
                     _ => {
                         // Update activity timestamp for any message
                         if let Some(client) = clients.write().await.get_mut(client_id) {
@@ -513,12 +528,12 @@ impl WebSocketServer {
                         }
                     }
                 }
-            },
+            }
             Err(e) => {
                 warn!("Invalid message from client {}: {}", client_id, e);
             }
         }
-        
+
         Ok(())
     }
 
@@ -533,7 +548,10 @@ impl WebSocketServer {
         // Check if current client is subscribed to this channel
         let is_subscribed = {
             if let Some(client) = clients.read().await.get(current_client_id) {
-                client.subscriptions.values().any(|channels| channels.contains(&channel.to_string()))
+                client
+                    .subscriptions
+                    .values()
+                    .any(|channels| channels.contains(&channel.to_string()))
             } else {
                 false
             }
@@ -550,7 +568,10 @@ impl WebSocketServer {
 
             if let Ok(msg_text) = serde_json::to_string(&ws_msg) {
                 if let Err(e) = ws_sender.send(Message::Text(msg_text)).await {
-                    error!("Failed to send message to client {}: {}", current_client_id, e);
+                    error!(
+                        "Failed to send message to client {}: {}",
+                        current_client_id, e
+                    );
                 }
             }
         }
@@ -562,16 +583,15 @@ impl WebSocketServer {
         let timeout = self.client_timeout_seconds;
 
         tokio::spawn(async move {
-            let mut heartbeat_interval = tokio::time::interval(
-                tokio::time::Duration::from_secs(interval)
-            );
+            let mut heartbeat_interval =
+                tokio::time::interval(tokio::time::Duration::from_secs(interval));
 
             loop {
                 heartbeat_interval.tick().await;
-                
+
                 let now = Utc::now();
                 let mut clients_to_remove = Vec::new();
-                
+
                 // Check for inactive clients
                 {
                     let clients_read = clients.read().await;
@@ -582,7 +602,7 @@ impl WebSocketServer {
                         }
                     }
                 }
-                
+
                 // Remove inactive clients
                 if !clients_to_remove.is_empty() {
                     let mut clients_write = clients.write().await;
@@ -591,7 +611,7 @@ impl WebSocketServer {
                         info!("Removed inactive client: {}", client_id);
                     }
                 }
-                
+
                 debug!("Active WebSocket clients: {}", clients.read().await.len());
             }
         });
@@ -601,9 +621,12 @@ impl WebSocketServer {
     pub async fn broadcast_portfolio_update(&self, update: PortfolioUpdate) -> Result<()> {
         match self.portfolio_tx.send(update) {
             Ok(_) => {
-                debug!("Broadcasted portfolio update to {} subscribers", self.portfolio_tx.receiver_count());
+                debug!(
+                    "Broadcasted portfolio update to {} subscribers",
+                    self.portfolio_tx.receiver_count()
+                );
                 Ok(())
-            },
+            }
             Err(e) => {
                 warn!("Failed to broadcast portfolio update: {}", e);
                 Ok(()) // Don't fail the system if no subscribers
@@ -614,9 +637,12 @@ impl WebSocketServer {
     pub async fn broadcast_strategy_update(&self, update: StrategyUpdate) -> Result<()> {
         match self.strategy_tx.send(update) {
             Ok(_) => {
-                debug!("Broadcasted strategy update to {} subscribers", self.strategy_tx.receiver_count());
+                debug!(
+                    "Broadcasted strategy update to {} subscribers",
+                    self.strategy_tx.receiver_count()
+                );
                 Ok(())
-            },
+            }
             Err(e) => {
                 warn!("Failed to broadcast strategy update: {}", e);
                 Ok(())
@@ -627,9 +653,12 @@ impl WebSocketServer {
     pub async fn broadcast_risk_update(&self, update: RiskUpdate) -> Result<()> {
         match self.risk_tx.send(update) {
             Ok(_) => {
-                debug!("Broadcasted risk update to {} subscribers", self.risk_tx.receiver_count());
+                debug!(
+                    "Broadcasted risk update to {} subscribers",
+                    self.risk_tx.receiver_count()
+                );
                 Ok(())
-            },
+            }
             Err(e) => {
                 warn!("Failed to broadcast risk update: {}", e);
                 Ok(())
@@ -640,9 +669,12 @@ impl WebSocketServer {
     pub async fn broadcast_market_update(&self, update: MarketUpdate) -> Result<()> {
         match self.market_tx.send(update) {
             Ok(_) => {
-                debug!("Broadcasted market update to {} subscribers", self.market_tx.receiver_count());
+                debug!(
+                    "Broadcasted market update to {} subscribers",
+                    self.market_tx.receiver_count()
+                );
                 Ok(())
-            },
+            }
             Err(e) => {
                 warn!("Failed to broadcast market update: {}", e);
                 Ok(())
@@ -653,9 +685,12 @@ impl WebSocketServer {
     pub async fn broadcast_trade_update(&self, update: TradeUpdate) -> Result<()> {
         match self.trade_tx.send(update) {
             Ok(_) => {
-                debug!("Broadcasted trade update to {} subscribers", self.trade_tx.receiver_count());
+                debug!(
+                    "Broadcasted trade update to {} subscribers",
+                    self.trade_tx.receiver_count()
+                );
                 Ok(())
-            },
+            }
             Err(e) => {
                 warn!("Failed to broadcast trade update: {}", e);
                 Ok(())
@@ -666,9 +701,12 @@ impl WebSocketServer {
     pub async fn broadcast_alert_update(&self, update: AlertUpdate) -> Result<()> {
         match self.alert_tx.send(update) {
             Ok(_) => {
-                debug!("Broadcasted alert update to {} subscribers", self.alert_tx.receiver_count());
+                debug!(
+                    "Broadcasted alert update to {} subscribers",
+                    self.alert_tx.receiver_count()
+                );
                 Ok(())
-            },
+            }
             Err(e) => {
                 warn!("Failed to broadcast alert update: {}", e);
                 Ok(())
@@ -679,9 +717,12 @@ impl WebSocketServer {
     pub async fn broadcast_opportunity_update(&self, update: OpportunityUpdate) -> Result<()> {
         match self.opportunity_tx.send(update) {
             Ok(_) => {
-                debug!("Broadcasted opportunity update to {} subscribers", self.opportunity_tx.receiver_count());
+                debug!(
+                    "Broadcasted opportunity update to {} subscribers",
+                    self.opportunity_tx.receiver_count()
+                );
                 Ok(())
-            },
+            }
             Err(e) => {
                 warn!("Failed to broadcast opportunity update: {}", e);
                 Ok(())
@@ -689,12 +730,18 @@ impl WebSocketServer {
         }
     }
 
-    pub async fn broadcast_circuit_breaker_update(&self, update: CircuitBreakerUpdate) -> Result<()> {
+    pub async fn broadcast_circuit_breaker_update(
+        &self,
+        update: CircuitBreakerUpdate,
+    ) -> Result<()> {
         match self.circuit_breaker_tx.send(update) {
             Ok(_) => {
-                debug!("Broadcasted circuit breaker update to {} subscribers", self.circuit_breaker_tx.receiver_count());
+                debug!(
+                    "Broadcasted circuit breaker update to {} subscribers",
+                    self.circuit_breaker_tx.receiver_count()
+                );
                 Ok(())
-            },
+            }
             Err(e) => {
                 warn!("Failed to broadcast circuit breaker update: {}", e);
                 Ok(())

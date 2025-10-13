@@ -1,166 +1,197 @@
-use anyhow::Result;
-use redis::{aio::MultiplexedConnection, AsyncCommands};
-use serde::{Deserialize, Serialize};
-use shared_models::{StrategyAllocation};
+use anyhow::{anyhow, Context, Result};
+use redis::{aio::MultiplexedConnection, streams::StreamReadOptions, AsyncCommands, Value};
+use serde::Deserialize;
+use shared_models::{StrategyAllocation, TradeMode};
 use std::collections::HashMap;
 use tokio::time::{sleep, Duration};
-use tracing::{info, Level};
+use tracing::{error, info, warn, Level};
 
 const RESULT_STREAM: &str = "backtest_results";
 const OUT_STREAM: &str = "allocations_channel";
+const MAX_POSITION_USD: f64 = 20.0;
 
 #[derive(Debug, Deserialize)]
-struct BacktestEnvelope { result: String }
+struct BacktestEnvelope {
+    result: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct BacktestSummary {
+    strategy_id: String,
+    sharpe_ratio: f64,
+    total_return_pct: f64,
+}
+
+fn value_to_string(value: &Value) -> Option<String> {
+    match value {
+        Value::Data(bytes) => std::str::from_utf8(bytes).ok().map(str::to_string),
+        Value::Status(s) => Some(s.clone()),
+        Value::Okay => Some("OK".to_string()),
+        Value::Bulk(values) if !values.is_empty() => value_to_string(&values[0]),
+        _ => None,
+    }
+}
+
+struct PortfolioAllocator {
+    weights: HashMap<String, f64>,
+    mode: TradeMode,
+    max_position_usd: f64,
+}
+
+impl PortfolioAllocator {
+    fn new(mode: TradeMode, max_position_usd: f64) -> Self {
+        Self {
+            weights: HashMap::new(),
+            mode,
+            max_position_usd,
+        }
+    }
+
+    fn incorporate(&mut self, summary: &BacktestSummary) -> Vec<StrategyAllocation> {
+        let weight = summary.sharpe_ratio.max(0.0);
+        self.weights.insert(summary.strategy_id.clone(), weight);
+
+        let total_weight: f64 = self.weights.values().copied().sum();
+        let normalizer = if total_weight > f64::EPSILON {
+            total_weight
+        } else {
+            1.0
+        };
+
+        self.weights
+            .iter()
+            .map(|(id, w)| StrategyAllocation {
+                id: id.clone(),
+                weight: if *w > 0.0 { *w / normalizer } else { 0.0 },
+                sharpe_ratio: *w,
+                mode: self.mode,
+                params: serde_json::json!({"source": "backtest_v25"}),
+                capital_allocated: 0.0,
+                max_position_usd: self.max_position_usd,
+                current_positions: 0.0,
+            })
+            .collect()
+    }
+}
 
 #[tokio::main]
 async fn main() -> Result<()> {
     tracing_subscriber::fmt().with_max_level(Level::INFO).init();
-    let redis_url = std::env::var("REDIS_URL")?;
-    let client = redis::Client::open(redis_url)?;
-    let mut conn: MultiplexedConnection = client.get_multiplexed_tokio_connection().await?;
 
-    info!("🏦 Portfolio‑Manager v25 alive");
+    let redis_url = std::env::var("REDIS_URL")
+        .with_context(|| "REDIS_URL env var missing for portfolio-manager")?;
+    let client = redis::Client::open(redis_url.clone())
+        .with_context(|| format!("Failed to create Redis client for {redis_url}"))?;
 
-    let mut last_id = "$".to_string();
+    // Robust Redis connection with retries (handles transient DNS failures)
+    let mut attempt: u32 = 0;
+    let mut conn: MultiplexedConnection = loop {
+        match client.get_multiplexed_tokio_connection().await {
+            Ok(c) => break c,
+            Err(e) => {
+                attempt += 1;
+                let backoff = Duration::from_secs((attempt.min(10)) as u64);
+                warn!(attempt, %e, "Redis connect failed; retrying in {:?}", backoff);
+                sleep(backoff).await;
+            }
+        }
+    };
+
+    info!(redis_url = %redis_url, "🏦 Portfolio-Manager v25 alive");
+
+    let mut allocator = PortfolioAllocator::new(TradeMode::Paper, MAX_POSITION_USD);
+    let mut last_id = "0-0".to_string();
+
     loop {
-        let res: redis::Value = conn
-            .xread_options(&[RESULT_STREAM], &[&last_id], &redis::streams::StreamReadOptions::default().block(0))
-            .await?;
-        if let redis::Value::Bulk(streams) = res {
-            for stream in streams {
-                if let redis::Value::Bulk(data) = stream {
-                    // data[0] = stream key, data[1] = messages
-                    if let redis::Value::Bulk(msgs) = &data[1] {
-                        for msg in msgs {
-                            if let redis::Value::Bulk(parts) = msg {
-                                let id = String::from_utf8(parts[0].as_data().unwrap().to_vec()).unwrap();
-                                last_id = id.clone();
-                                // parts[1] = kv list
-                                if let redis::Value::Bulk(kv) = &parts[1] {
-                                    if kv.len() >= 2 {
-                                        let payload = kv[1].as_data().unwrap();
-                                        let env: BacktestEnvelope = serde_json::from_slice(payload)?;
-                                        process_result(&env.result, &mut conn).await?;
-                                    }
-                                }
-                            }
+        match conn
+            .xread_options(
+                &[RESULT_STREAM],
+                &[&last_id],
+                &StreamReadOptions::default().block(1000).count(64),
+            )
+            .await
+            .context("Failed reading backtest results stream")?
+        {
+            Value::Bulk(streams) => {
+                for stream in streams {
+                    if let Value::Bulk(entries) = stream {
+                        if entries.len() < 2 {
+                            continue;
+                        }
+                        let Some(entry_id) = value_to_string(&entries[0]) else {
+                            error!("Skipping entry without id");
+                            continue;
+                        };
+                        last_id = entry_id;
+                        if let Value::Bulk(key_values) = &entries[1] {
+                            handle_entry(&key_values[..], &mut allocator, &mut conn).await?;
                         }
                     }
                 }
             }
+            Value::Nil => {
+                // No new data within the block timeout; continue polling.
+                continue;
+            }
+            other => {
+                return Err(anyhow!("Unexpected Redis response: {other:?}"));
+            }
         }
     }
 }
 
-async fn process_result(raw: &str, conn: &mut MultiplexedConnection) -> Result<()> {
-    #[derive(Deserialize)]
-    struct R { strategy_id: String, sharpe_ratio: f64, total_return_pct: f64 }
-    let r: R = serde_json::from_str(raw)?;
+async fn handle_entry(
+    key_values: &[Value],
+    allocator: &mut PortfolioAllocator,
+    conn: &mut MultiplexedConnection,
+) -> Result<()> {
+    let mut idx = 0;
+    while idx + 1 < key_values.len() {
+        let field = &key_values[idx];
+        let value = &key_values[idx + 1];
+        idx += 2;
 
-    // Very simple allocation: weight = max(0, sharpe)/sum
-    static mut WEIGHTS: HashMap<String, f64> = HashMap::new();
-    unsafe { WEIGHTS.insert(r.strategy_id.clone(), (r.sharpe_ratio).max(0.0)); }
-    let sum: f64 = unsafe { WEIGHTS.values().sum() };
+        let Some(field_name) = value_to_string(field) else {
+            continue;
+        };
 
-    let allocs: Vec<StrategyAllocation> = unsafe {
-        WEIGHTS
-            .iter()
-            .map(|(id, w)| StrategyAllocation {
-                id: id.clone(),
-                weight: if sum > 0.0 { *w / sum } else { 0.0 },
-                sharpe_ratio: *w,
-                mode: shared_models::TradeMode::Paper,
-                params: serde_json::json!({}),
-                capital_allocated: 0.0,
-                max_position_usd: 20.0,
-                current_positions: 0.0,
-            })
-            .collect()
-    };
+        if field_name != "result" {
+            continue;
+        }
 
-    let payload = serde_json::to_string(&allocs)?;
-    conn.xadd(OUT_STREAM, "*", &["allocations", &payload]).await?;
-    info!("Pushed {} allocations", allocs.len());
+        let payload =
+            value_to_string(value).ok_or_else(|| anyhow!("Result field missing payload"))?;
+
+        let envelope: BacktestEnvelope =
+            serde_json::from_str(&payload).context("Failed to deserialize BacktestEnvelope")?;
+        let summary: BacktestSummary = serde_json::from_str(&envelope.result)
+            .context("Failed to deserialize BacktestSummary")?;
+
+        let allocations = allocator.incorporate(&summary);
+        publish_allocations(conn, &allocations).await?;
+        info!(
+            strategy_id = %summary.strategy_id,
+            sharpe = summary.sharpe_ratio,
+            total_return_pct = summary.total_return_pct,
+            alloc_count = allocations.len(),
+            "updated allocations"
+        );
+    }
+
     Ok(())
 }
-                capital_allocated: 0.0,
-                max_position_usd: 20.0,
-                current_positions: 0.0,
-            })
-            .collect::<Vec<_>>()
-    };
 
-    let payload = serde_json::to_string(&allocs)?;
-    conn.xadd(OUT_STREAM, "*", &["allocations", &payload]).await?;
-    info!("Pushed {} allocations", allocs.len());
-    Ok(())
-}
-        
-        loop {
-            timer.tick().await;
-            
-            if let Err(e) = self.update_portfolio(&mut con).await {
-                error!("Failed to update portfolio: {}", e);
-            }
-            
-            if let Err(e) = self.publish_portfolio_state(&mut con).await {
-                error!("Failed to publish portfolio state: {}", e);
-            }
-        }
+async fn publish_allocations(
+    conn: &mut MultiplexedConnection,
+    allocations: &[StrategyAllocation],
+) -> Result<()> {
+    if allocations.is_empty() {
+        return Ok(());
     }
 
-    async fn update_portfolio(&mut self, con: &mut redis::aio::Connection) -> Result<()> {
-        // Update position values based on current market prices
-        let mut total_position_value = 0.0;
-        
-        for (symbol, position) in &mut self.portfolio.positions {
-            // Get current price from Redis (mock for now)
-            let current_price: Option<String> = con.get(format!("price:{}", symbol)).await?;
-            
-            if let Some(price_str) = current_price {
-                if let Ok(current_price) = price_str.parse::<f64>() {
-                    let position_value = position.quantity * current_price;
-                    position.unrealized_pnl = (current_price - position.avg_price) * position.quantity;
-                    total_position_value += position_value;
-                }
-            }
-        }
-        
-        self.portfolio.total_value = self.portfolio.available_cash + total_position_value;
-        self.portfolio.total_pnl = self.portfolio.total_value - 200.0; // Initial capital
-        
-        Ok(())
-    }
-
-    async fn publish_portfolio_state(&self, con: &mut redis::aio::Connection) -> Result<()> {
-        let portfolio_json = serde_json::to_string(&self.portfolio)?;
-        let _: () = con.set("portfolio:current", &portfolio_json).await?;
-        
-        // Publish to stream for monitoring
-        let event = serde_json::json!({
-            "type": "portfolio_update",
-            "total_value": self.portfolio.total_value,
-            "available_cash": self.portfolio.available_cash,
-            "total_pnl": self.portfolio.total_pnl,
-            "position_count": self.portfolio.positions.len(),
-            "timestamp": chrono::Utc::now().timestamp_millis()
-        });
-        
-        let _: () = con.xadd("portfolio_events", "*", &[("data", event.to_string())]).await?;
-        
-        Ok(())
-    }
-}
-
-#[tokio::main]
-async fn main() -> Result<()> {
-    tracing_subscriber::init();
-    
-    let redis_url = std::env::var("REDIS_URL")
-        .unwrap_or_else(|_| "redis://localhost:6379".to_string());
-    
-    let mut portfolio_manager = PortfolioManager::new(&redis_url)?;
-    portfolio_manager.start().await?;
-    
+    let payload = serde_json::to_string(allocations).context("Serializing allocations")?;
+    conn.xadd::<_, _, _, _, ()>(OUT_STREAM, "*", &[("allocations", payload)])
+        .await
+        .context("Failed to publish allocations")?;
     Ok(())
 }

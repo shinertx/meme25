@@ -257,6 +257,54 @@ docker compose ps
 docker compose logs -f executor
 ```
 
+### ⚡ Paper-Trading Quickstart (Optimized Build)
+For local validation or CI-style runs where you want tight rebuild loops, use the unified build
+pipeline and lightweight compose file:
+
+```bash
+# 1. Compile every Rust crate once (warms the cache and validates code)
+cargo build --release --workspace
+
+# 2. Bake lean runtime images that reuse the compiled artifacts
+DOCKER_BUILDKIT=1 docker compose -f docker-compose.efficient.yml build
+
+# 3. Launch the paper-trading stack with default mock credentials
+DOCKER_BUILDKIT=1 docker compose -f docker-compose.efficient.yml up -d
+
+# 4. Verify all services are healthy
+docker compose -f docker-compose.efficient.yml ps
+
+# 5. Inspect executor boot logs & metrics port (defaults to 9100)
+docker compose -f docker-compose.efficient.yml logs --tail=100 executor
+```
+
+**Heads-up:** the efficient compose file pins development-friendly environment variables (dummy
+API keys, paper-mode toggles). Replace them with real credentials before live trading by editing
+`docker-compose.efficient.yml` or providing overrides via `docker compose --env-file`.
+
+#### Market data filter toggles
+
+Key environment knobs for Solana meme coverage live inside `market_data_gateway`:
+
+- `MKT_MIN_LIQUIDITY_USD` – hard floor on pool liquidity (default $10M)
+- `MKT_MIN_VOLUME_USD` – rejects pairs whose 24h volume is below the floor (default $5M)
+- `MKT_NEWPAIRS_MIN_AGE_MIN` / `MKT_NEWPAIRS_MAX_AGE_MIN` – bounds acceptable pool age window (defaults 10–120 minutes)
+
+Tune these to balance breadth vs. execution quality; volume and age filters combine with the liquidity gate before anything hits the allocator.
+
+#### Reproducibility Checklist
+
+Run these before cutting a release or promoting a strategy update:
+
+- `cargo fmt && cargo clippy -- -D warnings` – style + lint sanity
+- `cargo build --release --workspace` – compile every crate and surface linkage issues
+- `cargo test --workspace` – fast unit coverage (integration harness stays disabled by default)
+- `cargo test -p tests --features integration-tests -- --ignored` – optional end-to-end harness
+   that exercises Redis/Postgres paths
+- `DOCKER_BUILDKIT=1 docker compose -f docker-compose.efficient.yml build` – ensure images bake
+- `DOCKER_BUILDKIT=1 docker compose -f docker-compose.efficient.yml up -d && docker compose -f
+   docker-compose.efficient.yml ps` – smoke test service startup
+
 ### Step 6: Verify Operation
 ```bash
 # Check if strategies are running

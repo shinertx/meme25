@@ -1,6 +1,6 @@
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use chrono::{DateTime, Utc};
 
 pub mod error;
 pub use error::{ModelError, Result};
@@ -85,7 +85,7 @@ impl MarketEvent {
             MarketEvent::Volume(_) => EventType::Volume,
         }
     }
-    
+
     pub fn token(&self) -> &str {
         match self {
             MarketEvent::Price(e) => &e.token_address,
@@ -103,7 +103,7 @@ impl MarketEvent {
             MarketEvent::Volume(e) => &e.token_address,
         }
     }
-    
+
     pub fn timestamp(&self) -> DateTime<Utc> {
         match self {
             MarketEvent::Price(e) => e.timestamp,
@@ -113,8 +113,12 @@ impl MarketEvent {
             MarketEvent::Funding(e) => e.timestamp,
             MarketEvent::OnChain(e) => e.timestamp,
             MarketEvent::SolPrice(e) => e.timestamp,
-            MarketEvent::TwitterRaw(e) => DateTime::from_timestamp(e.timestamp, 0).unwrap_or_else(Utc::now),
-            MarketEvent::FarcasterRaw(e) => DateTime::from_timestamp(e.timestamp, 0).unwrap_or_else(Utc::now),
+            MarketEvent::TwitterRaw(e) => {
+                DateTime::from_timestamp(e.timestamp, 0).unwrap_or_else(Utc::now)
+            }
+            MarketEvent::FarcasterRaw(e) => {
+                DateTime::from_timestamp(e.timestamp, 0).unwrap_or_else(Utc::now)
+            }
             MarketEvent::Whale(e) => e.timestamp,
             MarketEvent::Liquidation(e) => e.timestamp,
             MarketEvent::Airdrop(e) => e.timestamp,

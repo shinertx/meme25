@@ -1,10 +1,10 @@
+use chrono::{DateTime, Duration, Utc};
+use serde::{Deserialize, Serialize};
 use shared_models::error::Result;
-use tracing::{info, debug};
-use chrono::{DateTime, Utc, Duration};
-use std::collections::{HashMap, BTreeMap, VecDeque};
-use serde::{Serialize, Deserialize};
-use tokio::sync::RwLock;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
+use tokio::sync::RwLock;
+use tracing::info;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DashboardMetrics {
@@ -89,14 +89,14 @@ pub struct DashboardData {
     pub strategies: Vec<StrategyMetrics>,
     pub risk: RiskMetrics,
     pub market: MarketMetrics,
-    
+
     // Time series data for charts (last 24 hours)
     pub pnl_timeseries: Vec<TimeSeriesPoint>,
     pub volume_timeseries: Vec<TimeSeriesPoint>,
     pub drawdown_timeseries: Vec<TimeSeriesPoint>,
     pub risk_timeseries: Vec<TimeSeriesPoint>,
     pub opportunity_timeseries: Vec<TimeSeriesPoint>,
-    
+
     // Recent activity
     pub recent_trades: Vec<TradeActivity>,
     pub recent_alerts: Vec<AlertActivity>,
@@ -118,7 +118,7 @@ pub struct TradeActivity {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AlertActivity {
     pub timestamp: DateTime<Utc>,
-    pub level: String, // "Info", "Warning", "Critical"
+    pub level: String,    // "Info", "Warning", "Critical"
     pub category: String, // "Risk", "Performance", "System", "Market"
     pub message: String,
     pub strategy_id: Option<String>,
@@ -139,20 +139,21 @@ pub struct OpportunityActivity {
 
 pub struct PerformanceDashboard {
     dashboard_data: Arc<RwLock<DashboardData>>,
-    
+
     // Historical data storage
     historical_metrics: HashMap<String, VecDeque<TimeSeriesPoint>>,
     trade_history: VecDeque<TradeActivity>,
     alert_history: VecDeque<AlertActivity>,
     opportunity_history: VecDeque<OpportunityActivity>,
-    
+
     // Configuration
     max_history_points: usize,
     max_activity_records: usize,
     update_interval_seconds: u64,
-    
+
     // State tracking
     last_portfolio_value: f64,
+    last_metrics_update: DateTime<Utc>,
     session_start_time: DateTime<Utc>,
     peak_portfolio_value: f64,
 }
@@ -226,6 +227,7 @@ impl PerformanceDashboard {
             max_activity_records: 1000,
             update_interval_seconds: 30,
             last_portfolio_value: 200.0, // Starting with $200
+            last_metrics_update: Utc::now(),
             session_start_time: Utc::now(),
             peak_portfolio_value: 200.0,
         }
@@ -241,17 +243,29 @@ impl PerformanceDashboard {
     ) -> Result<()> {
         let now = Utc::now();
         let current_value = 200.0 + total_pnl; // Starting portfolio + PnL
-        
+
+        let elapsed_since_update = now
+            .signed_duration_since(self.last_metrics_update)
+            .num_seconds();
+        if elapsed_since_update >= 0 && (elapsed_since_update as u64) < self.update_interval_seconds
+        {
+            self.last_portfolio_value = current_value;
+            return Ok(());
+        }
+        self.last_metrics_update = now;
+
         // Update peak value
         if current_value > self.peak_portfolio_value {
             self.peak_portfolio_value = current_value;
         }
-        
+
         // Calculate current drawdown
         let current_drawdown = if self.peak_portfolio_value > 0.0 {
             ((self.peak_portfolio_value - current_value) / self.peak_portfolio_value) * 100.0
-        } else { 0.0 };
-        
+        } else {
+            0.0
+        };
+
         // Calculate daily P&L
         let session_duration = now.signed_duration_since(self.session_start_time);
         let daily_pnl = if session_duration.num_hours() >= 24 {
@@ -260,11 +274,11 @@ impl PerformanceDashboard {
         } else {
             total_pnl // Session P&L for shorter periods
         };
-        
+
         // Update data - release lock before adding timeseries
         {
             let mut data = self.dashboard_data.write().await;
-            
+
             // Update overview metrics
             data.overview.total_pnl_usd = total_pnl;
             data.overview.daily_pnl_usd = daily_pnl;
@@ -275,14 +289,22 @@ impl PerformanceDashboard {
             data.overview.current_drawdown_pct = current_drawdown;
             data.overview.timestamp = now;
         }
-        
+
+        let incremental_pnl = current_value - self.last_portfolio_value;
+        self.last_portfolio_value = current_value;
+
         // Add to time series after releasing the lock
         self.add_timeseries_point("pnl", now, total_pnl).await;
-        self.add_timeseries_point("portfolio_value", now, current_value).await;
-        
-        info!("Updated portfolio metrics - P&L: ${:.2}, Value: ${:.2}, Drawdown: {:.2}%", 
-              total_pnl, current_value, current_drawdown);
-        
+        self.add_timeseries_point("portfolio_value", now, current_value)
+            .await;
+        self.add_timeseries_point("pnl_delta", now, incremental_pnl)
+            .await;
+
+        info!(
+            "Updated portfolio metrics - P&L: ${:.2}, Value: ${:.2}, Drawdown: {:.2}%",
+            total_pnl, current_value, current_drawdown
+        );
+
         Ok(())
     }
 
@@ -291,19 +313,19 @@ impl PerformanceDashboard {
         strategy_metrics: Vec<StrategyMetrics>,
     ) -> Result<()> {
         let mut data = self.dashboard_data.write().await;
-        
+
         // Find best and worst performing strategies
         let mut best_strategy = "None".to_string();
         let mut worst_strategy = "None".to_string();
         let mut best_pnl = f64::NEG_INFINITY;
         let mut worst_pnl = f64::INFINITY;
-        
+
         // Calculate aggregate metrics
         let mut total_strategy_volume = 0.0;
         let mut total_strategy_trades = 0;
         let mut weighted_win_rate = 0.0;
         let mut total_weight = 0.0;
-        
+
         for strategy in &strategy_metrics {
             // Track best/worst performers
             if strategy.pnl_usd > best_pnl {
@@ -314,28 +336,32 @@ impl PerformanceDashboard {
                 worst_pnl = strategy.pnl_usd;
                 worst_strategy = strategy.strategy_id.clone();
             }
-            
+
             // Aggregate metrics
             total_strategy_volume += strategy.volume_usd;
             total_strategy_trades += strategy.trades_count;
-            
+
             // Weight win rate by volume
             if strategy.volume_usd > 0.0 {
                 weighted_win_rate += strategy.win_rate * strategy.volume_usd;
                 total_weight += strategy.volume_usd;
             }
         }
-        
+
         // Update overview with strategy-derived metrics
         data.overview.total_volume_usd = total_strategy_volume;
         data.overview.daily_trades = total_strategy_trades;
-        data.overview.win_rate = if total_weight > 0.0 { weighted_win_rate / total_weight } else { 0.0 };
+        data.overview.win_rate = if total_weight > 0.0 {
+            weighted_win_rate / total_weight
+        } else {
+            0.0
+        };
         data.overview.best_performing_strategy = best_strategy;
         data.overview.worst_performing_strategy = worst_strategy;
-        
+
         // Update strategy list
         data.strategies = strategy_metrics;
-        
+
         Ok(())
     }
 
@@ -343,21 +369,22 @@ impl PerformanceDashboard {
         let now = Utc::now();
         let var_95 = risk_metrics.portfolio_var_95;
         let volatility = risk_metrics.portfolio_volatility;
-        
+
         // Update data - release lock before adding timeseries
         {
             let mut data = self.dashboard_data.write().await;
             data.risk = risk_metrics;
-            
+
             // Update overview risk utilization
             data.overview.risk_utilization_pct = data.risk.margin_utilization_pct;
             data.overview.correlation_exposure = data.risk.correlation_risk_score;
         }
-        
+
         // Add to risk time series after releasing the lock
         self.add_timeseries_point("var_95", now, var_95).await;
-        self.add_timeseries_point("volatility", now, volatility).await;
-        
+        self.add_timeseries_point("volatility", now, volatility)
+            .await;
+
         Ok(())
     }
 
@@ -365,83 +392,85 @@ impl PerformanceDashboard {
         let now = Utc::now();
         let opportunity_count = market_metrics.opportunity_count as f64;
         let sentiment_score = market_metrics.social_sentiment_score;
-        
-        // Update data - release lock before adding timeseries  
+
+        // Update data - release lock before adding timeseries
         {
             let mut data = self.dashboard_data.write().await;
             data.market = market_metrics;
         }
-        
+
         // Add to opportunity time series after releasing the lock
-        self.add_timeseries_point("opportunities", now, opportunity_count).await;
-        self.add_timeseries_point("sentiment", now, sentiment_score).await;
-        
+        self.add_timeseries_point("opportunities", now, opportunity_count)
+            .await;
+        self.add_timeseries_point("sentiment", now, sentiment_score)
+            .await;
+
         Ok(())
     }
 
     pub async fn record_trade_activity(&mut self, trade: TradeActivity) -> Result<()> {
         // Add to history
         self.trade_history.push_back(trade.clone());
-        
+
         // Maintain size limit
         while self.trade_history.len() > self.max_activity_records {
             self.trade_history.pop_front();
         }
-        
+
         // Update dashboard data
         let mut data = self.dashboard_data.write().await;
         data.recent_trades.push(trade);
-        
+
         // Keep only recent trades (last 100)
         if data.recent_trades.len() > 100 {
             let excess = data.recent_trades.len() - 100;
             data.recent_trades.drain(0..excess);
         }
-        
+
         Ok(())
     }
 
     pub async fn record_alert(&mut self, alert: AlertActivity) -> Result<()> {
         // Add to history
         self.alert_history.push_back(alert.clone());
-        
+
         // Maintain size limit
         while self.alert_history.len() > self.max_activity_records {
             self.alert_history.pop_front();
         }
-        
+
         // Update dashboard data
         let mut data = self.dashboard_data.write().await;
         data.recent_alerts.push(alert);
-        
+
         // Keep only recent alerts (last 50)
         if data.recent_alerts.len() > 50 {
             let excess = data.recent_alerts.len() - 50;
             data.recent_alerts.drain(0..excess);
         }
-        
+
         Ok(())
     }
 
     pub async fn record_opportunity(&mut self, opportunity: OpportunityActivity) -> Result<()> {
         // Add to history
         self.opportunity_history.push_back(opportunity.clone());
-        
+
         // Maintain size limit
         while self.opportunity_history.len() > self.max_activity_records {
             self.opportunity_history.pop_front();
         }
-        
+
         // Update dashboard data
         let mut data = self.dashboard_data.write().await;
         data.recent_opportunities.push(opportunity);
-        
+
         // Keep only recent opportunities (last 50)
         if data.recent_opportunities.len() > 50 {
             let excess = data.recent_opportunities.len() - 50;
             data.recent_opportunities.drain(0..excess);
         }
-        
+
         Ok(())
     }
 
@@ -461,18 +490,19 @@ impl PerformanceDashboard {
             value,
             secondary_value: None,
         };
-        
-        let series = self.historical_metrics
+
+        let series = self
+            .historical_metrics
             .entry(metric.to_string())
             .or_insert_with(VecDeque::new);
-        
+
         series.push_back(point.clone());
-        
+
         // Maintain size limit
         while series.len() > self.max_history_points {
             series.pop_front();
         }
-        
+
         // Update dashboard data with recent points
         let mut data = self.dashboard_data.write().await;
         match metric {
@@ -486,18 +516,19 @@ impl PerformanceDashboard {
     // Calculate daily P&L from historical data
     async fn calculate_daily_pnl(&self, current_time: DateTime<Utc>) -> f64 {
         let twenty_four_hours_ago = current_time - Duration::hours(24);
-        
+
         if let Some(pnl_series) = self.historical_metrics.get("pnl") {
             // Find the P&L value from 24 hours ago
-            if let Some(old_point) = pnl_series.iter()
-                .find(|p| p.timestamp >= twenty_four_hours_ago) {
-                
+            if let Some(old_point) = pnl_series
+                .iter()
+                .find(|p| p.timestamp >= twenty_four_hours_ago)
+            {
                 if let Some(current_point) = pnl_series.back() {
                     return current_point.value - old_point.value;
                 }
             }
         }
-        
+
         // Fallback to session P&L if no historical data
         0.0
     }
@@ -507,37 +538,36 @@ impl PerformanceDashboard {
             if pnl_series.len() < 2 || periods < 2 {
                 return 0.0;
             }
-            
-            let recent_points: Vec<_> = pnl_series.iter()
-                .rev()
-                .take(periods)
-                .collect();
-            
+
+            let recent_points: Vec<_> = pnl_series.iter().rev().take(periods).collect();
+
             if recent_points.len() < 2 {
                 return 0.0;
             }
-            
+
             // Calculate returns
             let mut returns = Vec::new();
             for i in 1..recent_points.len() {
-                let current_val = recent_points[i-1].value;
+                let current_val = recent_points[i - 1].value;
                 let prev_val = recent_points[i].value;
                 if prev_val != 0.0 {
                     returns.push((current_val - prev_val) / prev_val.abs());
                 }
             }
-            
+
             if returns.is_empty() {
                 return 0.0;
             }
-            
+
             // Calculate mean and std dev
             let mean_return = returns.iter().sum::<f64>() / returns.len() as f64;
-            let variance = returns.iter()
+            let variance = returns
+                .iter()
                 .map(|r| (r - mean_return).powi(2))
-                .sum::<f64>() / returns.len() as f64;
+                .sum::<f64>()
+                / returns.len() as f64;
             let std_dev = variance.sqrt();
-            
+
             if std_dev == 0.0 {
                 0.0
             } else {
@@ -553,7 +583,7 @@ impl PerformanceDashboard {
     pub async fn generate_performance_summary(&self, hours_back: i64) -> String {
         let data = self.get_dashboard_data().await;
         let sharpe = self.calculate_sharpe_ratio(hours_back as usize * 2).await; // 30-min intervals
-        
+
         format!(
             "=== MemeSnipe v25 Performance Dashboard ===\n\
             📊 Portfolio Overview:\n\
@@ -596,7 +626,11 @@ impl PerformanceDashboard {
             data.risk.portfolio_var_95,
             data.risk.portfolio_volatility * 100.0,
             data.overview.risk_utilization_pct,
-            if data.risk.circuit_breaker_triggered { "TRIGGERED" } else { "Normal" },
+            if data.risk.circuit_breaker_triggered {
+                "TRIGGERED"
+            } else {
+                "Normal"
+            },
             data.market.market_regime,
             data.market.opportunity_count,
             data.market.social_sentiment_score,

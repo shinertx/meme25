@@ -1,9 +1,9 @@
-use shared_models::error::{Result, ModelError};
-use tracing::{info, warn, debug};
-use chrono::{DateTime, Utc, Duration};
-use std::collections::{HashMap, BTreeMap, VecDeque};
-use serde::{Serialize, Deserialize};
-use shared_models::{Side, Trade, RiskMetrics};
+use chrono::{DateTime, Duration, Utc};
+use serde::{Deserialize, Serialize};
+use shared_models::error::Result;
+use shared_models::{RiskMetrics, Side};
+use std::collections::{HashMap, VecDeque};
+use tracing::{debug, info, warn};
 
 /// Comprehensive risk overlay system with multi-layer protection
 #[derive(Debug, Clone)]
@@ -12,24 +12,24 @@ pub struct RiskOverlay {
     max_portfolio_exposure_usd: f64,
     max_daily_loss_usd: f64,
     max_concentration_pct: f64,
-    
-    // Position-level limits  
+
+    // Position-level limits
     max_position_size_usd: f64,
     _max_leverage: f64,
     max_correlation: f64,
-    
+
     // Time-based limits
     max_trades_per_hour: u32,
     _max_trades_per_day: u32,
     _cooldown_period_minutes: u32,
-    
+
     // Dynamic tracking
     daily_pnl: f64,
     current_positions: HashMap<String, PositionRisk>,
     trade_history: VecDeque<TradeRecord>,
     correlation_matrix: HashMap<String, HashMap<String, f64>>,
     volatility_estimates: HashMap<String, f64>,
-    
+
     // Risk events
     circuit_breaker_triggered: bool,
     _last_risk_check: DateTime<Utc>,
@@ -106,24 +106,24 @@ impl RiskOverlay {
             max_portfolio_exposure_usd: 180.0, // 90% of capital
             max_daily_loss_usd: 20.0,          // 10% daily max loss
             max_concentration_pct: 25.0,       // 25% max in any single asset
-            
+
             // Position limits
-            max_position_size_usd: 40.0,       // $40 max position
-            _max_leverage: 1.0,                 // No leverage initially
-            max_correlation: 0.7,              // Max correlation between positions
-            
+            max_position_size_usd: 40.0, // $40 max position
+            _max_leverage: 1.0,          // No leverage initially
+            max_correlation: 0.7,        // Max correlation between positions
+
             // Trading frequency limits
             max_trades_per_hour: 10,
             _max_trades_per_day: 50,
             _cooldown_period_minutes: 5,
-            
+
             // State tracking
             daily_pnl: 0.0,
             current_positions: HashMap::new(),
             trade_history: VecDeque::with_capacity(1000),
             correlation_matrix: HashMap::new(),
             volatility_estimates: HashMap::new(),
-            
+
             circuit_breaker_triggered: false,
             _last_risk_check: Utc::now(),
             risk_events: VecDeque::with_capacity(100),
@@ -159,18 +159,19 @@ impl RiskOverlay {
         let total_exposure = self.calculate_total_exposure();
         if total_exposure + proposed_size_usd > self.max_portfolio_exposure_usd {
             warnings.push(format!(
-                "Would exceed portfolio limit (${:.0} + ${:.0} > ${:.0})", 
+                "Would exceed portfolio limit (${:.0} + ${:.0} > ${:.0})",
                 total_exposure, proposed_size_usd, self.max_portfolio_exposure_usd
             ));
             risk_score += 25.0;
         }
 
         // 2. Position size check
-        let current_position_size = self.current_positions
+        let current_position_size = self
+            .current_positions
             .get(symbol)
             .map(|p| p.size_usd)
             .unwrap_or(0.0);
-        
+
         if current_position_size + proposed_size_usd > self.max_position_size_usd {
             let max_additional = self.max_position_size_usd - current_position_size;
             adjustments.push(format!(
@@ -182,10 +183,11 @@ impl RiskOverlay {
 
         // 3. Concentration risk check
         let portfolio_value = self.calculate_portfolio_value();
-        let concentration_pct = (current_position_size + proposed_size_usd) / portfolio_value * 100.0;
+        let concentration_pct =
+            (current_position_size + proposed_size_usd) / portfolio_value * 100.0;
         if concentration_pct > self.max_concentration_pct {
             warnings.push(format!(
-                "High concentration risk: {:.1}% in {}", 
+                "High concentration risk: {:.1}% in {}",
                 concentration_pct, symbol
             ));
             risk_score += 15.0;
@@ -195,7 +197,7 @@ impl RiskOverlay {
         let correlation_impact = self.calculate_correlation_impact(symbol, proposed_size_usd);
         if correlation_impact > self.max_correlation {
             warnings.push(format!(
-                "High correlation exposure: {:.2} correlation impact", 
+                "High correlation exposure: {:.2} correlation impact",
                 correlation_impact
             ));
             risk_score += 10.0;
@@ -234,7 +236,11 @@ impl RiskOverlay {
 
         // Calculate recommended stop loss
         let recommended_stop_loss = self.calculate_recommended_stop_loss(
-            symbol, side, current_price, adjusted_size, *volatility
+            symbol,
+            side,
+            current_price,
+            adjusted_size,
+            *volatility,
         );
 
         let approved = risk_score < 75.0 && adjusted_size > 5.0; // Minimum $5 position
@@ -243,7 +249,10 @@ impl RiskOverlay {
             self.record_risk_event(
                 RiskEventType::PositionLimit,
                 RiskSeverity::Medium,
-                format!("Trade rejected for {}: risk score {:.1}", symbol, risk_score),
+                format!(
+                    "Trade rejected for {}: risk score {:.1}",
+                    symbol, risk_score
+                ),
                 Some(symbol.to_string()),
                 "Trade rejected".to_string(),
             );
@@ -270,7 +279,8 @@ impl RiskOverlay {
         timestamp: DateTime<Utc>,
     ) -> Result<()> {
         // Update position tracking
-        let position = self.current_positions
+        let position = self
+            .current_positions
             .entry(symbol.to_string())
             .or_insert(PositionRisk {
                 symbol: symbol.to_string(),
@@ -287,10 +297,10 @@ impl RiskOverlay {
         match side {
             Side::Long => {
                 position.size_usd += size_usd;
-            },
+            }
             Side::Short => {
                 position.size_usd -= size_usd;
-            },
+            }
         }
 
         // Record trade in history
@@ -331,16 +341,23 @@ impl RiskOverlay {
         volatility: f64,
     ) -> Result<()> {
         // Update volatility estimate
-        self.volatility_estimates.insert(symbol.to_string(), volatility);
+        self.volatility_estimates
+            .insert(symbol.to_string(), volatility);
 
         // Update position if exists
         if let Some(position) = self.current_positions.get_mut(symbol) {
             position.current_price = current_price;
-            
+
             // Calculate unrealized PnL
             position.unrealized_pnl = match position.side {
-                Side::Long => (current_price - position.entry_price) * (position.size_usd / position.entry_price),
-                Side::Short => (position.entry_price - current_price) * (position.size_usd / position.entry_price),
+                Side::Long => {
+                    (current_price - position.entry_price)
+                        * (position.size_usd / position.entry_price)
+                }
+                Side::Short => {
+                    (position.entry_price - current_price)
+                        * (position.size_usd / position.entry_price)
+                }
             };
 
             // Calculate VaR at 95% confidence
@@ -352,7 +369,8 @@ impl RiskOverlay {
 
     /// Check for circuit breaker conditions
     pub fn check_circuit_breaker(&mut self) -> Result<bool> {
-        let total_unrealized_pnl: f64 = self.current_positions
+        let total_unrealized_pnl: f64 = self
+            .current_positions
             .values()
             .map(|p| p.unrealized_pnl)
             .sum();
@@ -361,7 +379,7 @@ impl RiskOverlay {
 
         if total_pnl < -self.max_daily_loss_usd {
             self.circuit_breaker_triggered = true;
-            
+
             self.record_risk_event(
                 RiskEventType::DrawdownLimit,
                 RiskSeverity::Critical,
@@ -389,9 +407,9 @@ impl RiskOverlay {
         if new_day {
             self.daily_pnl = 0.0;
         }
-        
+
         self.circuit_breaker_triggered = false;
-        
+
         info!("Circuit breaker reset, trading resumed");
     }
 
@@ -399,7 +417,8 @@ impl RiskOverlay {
     pub fn generate_risk_report(&self) -> RiskReport {
         let total_exposure = self.calculate_total_exposure();
         let portfolio_value = self.calculate_portfolio_value();
-        let total_var_95 = self.current_positions
+        let total_var_95 = self
+            .current_positions
             .values()
             .map(|p| p.value_at_risk_95)
             .sum::<f64>();
@@ -434,17 +453,18 @@ impl RiskOverlay {
 
     fn calculate_portfolio_value(&self) -> f64 {
         // Start with initial capital and add all PnL
-        let total_unrealized: f64 = self.current_positions
+        let total_unrealized: f64 = self
+            .current_positions
             .values()
             .map(|p| p.unrealized_pnl)
             .sum();
-        
+
         200.0 + self.daily_pnl + total_unrealized // Starting with $200
     }
 
     fn calculate_correlation_impact(&self, symbol: &str, size_usd: f64) -> f64 {
         let mut total_correlation_exposure = 0.0;
-        
+
         for (other_symbol, position) in &self.current_positions {
             if other_symbol != symbol {
                 if let Some(correlation_map) = self.correlation_matrix.get(symbol) {
@@ -454,18 +474,19 @@ impl RiskOverlay {
                 }
             }
         }
-        
+
         total_correlation_exposure / (size_usd + self.calculate_total_exposure())
     }
 
     fn calculate_max_position_size(&self, symbol: &str, portfolio_value: f64) -> f64 {
         let max_by_limit = self.max_position_size_usd;
         let max_by_concentration = portfolio_value * (self.max_concentration_pct / 100.0);
-        let current_position = self.current_positions
+        let current_position = self
+            .current_positions
             .get(symbol)
             .map(|p| p.size_usd.abs())
             .unwrap_or(0.0);
-        
+
         (max_by_limit.min(max_by_concentration) - current_position).max(0.0)
     }
 

@@ -1,14 +1,14 @@
-use shared_models::error::{Result, ModelError};
+use chrono::{DateTime, Duration, Utc};
+use serde::{Deserialize, Serialize};
+use shared_models::error::Result;
 use std::collections::HashMap;
-use tracing::{info, warn, debug};
-use chrono::{DateTime, Utc, Duration};
-use serde::{Serialize, Deserialize};
+use tracing::{debug, info};
 
 /// Transaction Cost Analysis Engine
-/// 
+///
 /// **EDGE THESIS**: Minimizing transaction costs through intelligent execution
 /// timing and routing significantly enhances net returns, especially for high-frequency strategies.
-/// 
+///
 /// **INSTITUTIONAL FEATURES**:
 /// - Real-time TCA with pre-trade and post-trade analysis
 /// - Implementation Shortfall tracking vs. decision price
@@ -133,15 +133,36 @@ impl TransactionCostAnalyzer {
 
     /// Add trade record for cost analysis
     pub fn record_trade(&mut self, trade: TradeRecord) -> Result<()> {
-        debug!("Recording trade for TCA: {} {} @ ${}", 
-               trade.symbol, trade.side, trade.execution_price);
+        debug!(
+            "Recording trade for TCA: {} {} @ ${}",
+            trade.symbol, trade.side, trade.execution_price
+        );
+
+        let benchmark_delta = if self.cost_benchmarks.arrival_price > 0.0 {
+            trade.execution_price - self.cost_benchmarks.arrival_price
+        } else {
+            0.0
+        };
+        self.cost_benchmarks.arrival_price = trade.decision_price;
+        self.cost_benchmarks.last_price = trade.execution_price;
+        self.cost_benchmarks.mid_price = if self.cost_benchmarks.mid_price == 0.0 {
+            trade.execution_price
+        } else {
+            (self.cost_benchmarks.mid_price * 0.8) + trade.execution_price * 0.2
+        };
+
+        debug!("Benchmark delta {:.4} vs arrival price", benchmark_delta);
 
         // Calculate implementation shortfall
         let implementation_shortfall = self.calculate_implementation_shortfall(&trade);
-        
+        debug!(
+            "Implementation shortfall for {}: {:.2} bps",
+            trade.trade_id, implementation_shortfall
+        );
+
         // Update venue metrics
         self.update_venue_metrics(&trade);
-        
+
         // Store trade record
         self.trade_records.insert(trade.trade_id.clone(), trade);
 
@@ -160,7 +181,7 @@ impl TransactionCostAnalyzer {
             "sell" | "short" => trade.decision_price - trade.execution_price,
             _ => 0.0,
         };
-        
+
         (price_diff / trade.decision_price) * 10000.0 // Convert to basis points
     }
 
@@ -170,13 +191,14 @@ impl TransactionCostAnalyzer {
         let old_slippage;
         let old_latency;
         let old_volume;
-        
+
         // Get current values before borrowing mutably
         {
-            let venue_metrics = self.venue_cost_analysis
+            let venue_metrics = self
+                .venue_cost_analysis
                 .entry(venue_name.clone())
                 .or_insert_with(|| VenueCostMetrics::new(&trade.venue));
-            
+
             old_slippage = venue_metrics.avg_slippage_bps;
             old_latency = venue_metrics.avg_latency_ms;
             old_volume = venue_metrics.total_volume_usd;
@@ -187,14 +209,14 @@ impl TransactionCostAnalyzer {
             old_slippage,
             trade.slippage_bps,
             old_volume,
-            trade.notional_usd
+            trade.notional_usd,
         );
 
         let new_latency = self.update_running_average(
             old_latency,
             trade.latency_ms as f64,
             old_volume,
-            trade.notional_usd
+            trade.notional_usd,
         );
 
         // Calculate updated efficiency score before mutable borrow
@@ -205,7 +227,7 @@ impl TransactionCostAnalyzer {
             updated_metrics.avg_latency_ms = new_latency;
             updated_metrics.total_volume_usd += trade.notional_usd;
             updated_metrics.total_fees_usd += trade.fees_usd;
-            
+
             self.calculate_venue_efficiency_score(&updated_metrics)
         };
 
@@ -219,11 +241,17 @@ impl TransactionCostAnalyzer {
     }
 
     /// Update running average with volume weighting
-    fn update_running_average(&self, current_avg: f64, new_value: f64, current_volume: f64, new_volume: f64) -> f64 {
+    fn update_running_average(
+        &self,
+        current_avg: f64,
+        new_value: f64,
+        current_volume: f64,
+        new_volume: f64,
+    ) -> f64 {
         if current_volume + new_volume == 0.0 {
             return new_value;
         }
-        
+
         (current_avg * current_volume + new_value * new_volume) / (current_volume + new_volume)
     }
 
@@ -239,7 +267,9 @@ impl TransactionCostAnalyzer {
         };
         let fee_score = (50.0 - fee_rate.min(50.0)) / 50.0;
 
-        (0.5 * slippage_score + 0.3 * latency_score + 0.2 * fee_score).max(0.0).min(1.0)
+        (0.5 * slippage_score + 0.3 * latency_score + 0.2 * fee_score)
+            .max(0.0)
+            .min(1.0)
     }
 
     /// Check if analysis should be run
@@ -247,7 +277,7 @@ impl TransactionCostAnalyzer {
         let minutes_since_analysis = Utc::now()
             .signed_duration_since(self.last_analysis_time)
             .num_minutes();
-        
+
         minutes_since_analysis >= self.analysis_frequency_minutes as i64
     }
 
@@ -266,9 +296,12 @@ impl TransactionCostAnalyzer {
 
         // Generate cost optimization recommendations
         let recommendations = self.generate_cost_optimization_recommendations();
-        
+
         if !recommendations.is_empty() {
-            info!("💡 Generated {} cost optimization recommendations", recommendations.len());
+            info!(
+                "💡 Generated {} cost optimization recommendations",
+                recommendations.len()
+            );
             for rec in &recommendations {
                 info!("  • {}", rec);
             }
@@ -281,9 +314,11 @@ impl TransactionCostAnalyzer {
     /// Update daily cost summaries
     fn update_daily_summaries(&mut self) -> Result<()> {
         let today = Utc::now().format("%Y-%m-%d").to_string();
-        
+
         // Get today's trades
-        let today_trades: Vec<&TradeRecord> = self.trade_records.values()
+        let today_trades: Vec<&TradeRecord> = self
+            .trade_records
+            .values()
             .filter(|trade| trade.execution_timestamp.format("%Y-%m-%d").to_string() == today)
             .collect();
 
@@ -293,17 +328,23 @@ impl TransactionCostAnalyzer {
 
         let total_volume: f64 = today_trades.iter().map(|t| t.notional_usd).sum();
         let total_fees: f64 = today_trades.iter().map(|t| t.fees_usd).sum();
-        let avg_slippage: f64 = today_trades.iter()
+        let avg_slippage: f64 = today_trades
+            .iter()
             .map(|t| t.slippage_bps * t.notional_usd)
-            .sum::<f64>() / total_volume;
-        let avg_market_impact: f64 = today_trades.iter()
+            .sum::<f64>()
+            / total_volume;
+        let avg_market_impact: f64 = today_trades
+            .iter()
             .map(|t| t.market_impact_bps * t.notional_usd)
-            .sum::<f64>() / total_volume;
+            .sum::<f64>()
+            / total_volume;
 
         // Calculate implementation shortfall for the day
-        let implementation_shortfall = today_trades.iter()
+        let implementation_shortfall = today_trades
+            .iter()
             .map(|t| self.calculate_implementation_shortfall(t) * t.notional_usd)
-            .sum::<f64>() / total_volume;
+            .sum::<f64>()
+            / total_volume;
 
         let summary = DailyCostSummary {
             date: today.clone(),
@@ -327,15 +368,19 @@ impl TransactionCostAnalyzer {
         }
 
         let total_volume: f64 = trades.iter().map(|t| t.notional_usd).sum();
-        
+
         // Volume-weighted average of cost components
-        let avg_slippage = trades.iter()
+        let avg_slippage = trades
+            .iter()
             .map(|t| t.slippage_bps * t.notional_usd)
-            .sum::<f64>() / total_volume;
-        
-        let avg_latency = trades.iter()
+            .sum::<f64>()
+            / total_volume;
+
+        let avg_latency = trades
+            .iter()
             .map(|t| t.latency_ms as f64 * t.notional_usd)
-            .sum::<f64>() / total_volume;
+            .sum::<f64>()
+            / total_volume;
 
         let fee_rate = trades.iter().map(|t| t.fees_usd).sum::<f64>() / total_volume * 10000.0;
 
@@ -344,16 +389,19 @@ impl TransactionCostAnalyzer {
         let latency_score = (2000.0 - avg_latency.min(2000.0)) / 2000.0;
         let fee_score = (50.0 - fee_rate.min(50.0)) / 50.0;
 
-        (0.5 * slippage_score + 0.3 * latency_score + 0.2 * fee_score).max(0.0).min(1.0)
+        (0.5 * slippage_score + 0.3 * latency_score + 0.2 * fee_score)
+            .max(0.0)
+            .min(1.0)
     }
 
     /// Calculate strategy-specific cost attribution
     fn calculate_strategy_cost_attribution(&mut self) -> Result<()> {
         let mut strategy_trades: HashMap<String, Vec<&TradeRecord>> = HashMap::new();
-        
+
         // Group trades by strategy
         for trade in self.trade_records.values() {
-            strategy_trades.entry(trade.strategy_id.clone())
+            strategy_trades
+                .entry(trade.strategy_id.clone())
                 .or_insert_with(Vec::new)
                 .push(trade);
         }
@@ -365,26 +413,34 @@ impl TransactionCostAnalyzer {
             }
 
             let total_volume: f64 = trades.iter().map(|t| t.notional_usd).sum();
-            
+
             if total_volume == 0.0 {
                 continue;
             }
 
-            let slippage_cost = trades.iter()
+            let slippage_cost = trades
+                .iter()
                 .map(|t| t.slippage_bps * t.notional_usd)
-                .sum::<f64>() / total_volume;
+                .sum::<f64>()
+                / total_volume;
 
-            let fee_cost = trades.iter()
+            let fee_cost = trades
+                .iter()
                 .map(|t| t.fees_usd * 10000.0 / t.notional_usd * t.notional_usd)
-                .sum::<f64>() / total_volume;
+                .sum::<f64>()
+                / total_volume;
 
-            let market_impact_cost = trades.iter()
+            let market_impact_cost = trades
+                .iter()
                 .map(|t| t.market_impact_bps * t.notional_usd)
-                .sum::<f64>() / total_volume;
+                .sum::<f64>()
+                / total_volume;
 
-            let timing_cost = trades.iter()
+            let timing_cost = trades
+                .iter()
                 .map(|t| self.calculate_implementation_shortfall(t) * t.notional_usd)
-                .sum::<f64>() / total_volume;
+                .sum::<f64>()
+                / total_volume;
 
             let total_cost = slippage_cost + fee_cost + market_impact_cost + timing_cost.abs();
 
@@ -412,12 +468,14 @@ impl TransactionCostAnalyzer {
             return 0.0;
         }
 
-        let best_venue_cost = trades.iter()
+        let best_venue_cost = trades
+            .iter()
             .map(|t| t.slippage_bps + t.fees_usd / t.notional_usd * 10000.0)
             .min_by(|a, b| a.partial_cmp(b).unwrap())
             .unwrap_or(0.0);
 
-        let worst_venue_cost = trades.iter()
+        let worst_venue_cost = trades
+            .iter()
             .map(|t| t.slippage_bps + t.fees_usd / t.notional_usd * 10000.0)
             .max_by(|a, b| a.partial_cmp(b).unwrap())
             .unwrap_or(0.0);
@@ -428,8 +486,12 @@ impl TransactionCostAnalyzer {
     /// Update market impact model based on recent trades
     fn update_market_impact_model(&mut self) -> Result<()> {
         // Simplified model update - in production this would use more sophisticated ML
-        let recent_trades: Vec<&TradeRecord> = self.trade_records.values()
-            .filter(|t| Utc::now().signed_duration_since(t.execution_timestamp) < Duration::hours(24))
+        let recent_trades: Vec<&TradeRecord> = self
+            .trade_records
+            .values()
+            .filter(|t| {
+                Utc::now().signed_duration_since(t.execution_timestamp) < Duration::hours(24)
+            })
             .collect();
 
         if recent_trades.len() < 10 {
@@ -437,9 +499,11 @@ impl TransactionCostAnalyzer {
         }
 
         // Update temporary impact decay
-        let avg_recovery_time: u64 = recent_trades.iter()
+        let avg_recovery_time: u64 = recent_trades
+            .iter()
             .map(|_| 30000) // Simplified: assume 30 second recovery
-            .sum::<u64>() / recent_trades.len() as u64;
+            .sum::<u64>()
+            / recent_trades.len() as u64;
 
         self.market_impact_model.temporary_impact_decay_ms = avg_recovery_time;
 
@@ -452,7 +516,9 @@ impl TransactionCostAnalyzer {
         let mut recommendations = Vec::new();
 
         // Analyze venue performance
-        let mut venue_scores: Vec<(&String, f64)> = self.venue_cost_analysis.iter()
+        let mut venue_scores: Vec<(&String, f64)> = self
+            .venue_cost_analysis
+            .iter()
             .map(|(name, metrics)| (name, metrics.cost_efficiency_score))
             .collect();
         venue_scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
@@ -460,12 +526,14 @@ impl TransactionCostAnalyzer {
         if venue_scores.len() > 1 {
             let best_venue = &venue_scores[0];
             let worst_venue = &venue_scores[venue_scores.len() - 1];
-            
+
             if best_venue.1 - worst_venue.1 > 0.2 {
                 recommendations.push(format!(
                     "Route more trades to {} (efficiency: {:.1}%) vs {} (efficiency: {:.1}%)",
-                    best_venue.0, best_venue.1 * 100.0,
-                    worst_venue.0, worst_venue.1 * 100.0
+                    best_venue.0,
+                    best_venue.1 * 100.0,
+                    worst_venue.0,
+                    worst_venue.1 * 100.0
                 ));
             }
         }
@@ -505,11 +573,31 @@ impl TransactionCostAnalyzer {
         }
 
         // Find venue with best efficiency score for similar trade sizes
-        let best_venue = self.venue_cost_analysis.iter()
-            .max_by(|a, b| a.1.cost_efficiency_score.partial_cmp(&b.1.cost_efficiency_score).unwrap())
+        let best_venue = self
+            .venue_cost_analysis
+            .iter()
+            .min_by(|a, b| {
+                let cost_a = self.estimate_venue_cost(a.1, trade_size_usd);
+                let cost_b = self.estimate_venue_cost(b.1, trade_size_usd);
+                cost_a
+                    .partial_cmp(&cost_b)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
             .map(|(name, _)| name.clone());
 
         best_venue
+    }
+
+    fn estimate_venue_cost(&self, metrics: &VenueCostMetrics, trade_size_usd: f64) -> f64 {
+        if trade_size_usd <= 0.0 {
+            return metrics.cost_efficiency_score;
+        }
+
+        let fee_bps = metrics.fee_structure.taker_fee_bps + metrics.fee_structure.platform_fee_bps;
+        let gas_component = (metrics.fee_structure.gas_cost_usd / trade_size_usd) * 10_000.0;
+        let slippage_component = metrics.avg_slippage_bps;
+
+        slippage_component + fee_bps + gas_component
     }
 }
 
@@ -534,10 +622,10 @@ impl Default for MarketImpactModel {
             liquidity_adjustment_factor: 1.0,
             volatility_adjustment_factor: 1.0,
             size_impact_curve: vec![
-                (0.01, 1.0),   // 1% of volume = 1bp impact
-                (0.05, 5.0),   // 5% of volume = 5bp impact
-                (0.10, 15.0),  // 10% of volume = 15bp impact
-                (0.20, 40.0),  // 20% of volume = 40bp impact
+                (0.01, 1.0),  // 1% of volume = 1bp impact
+                (0.05, 5.0),  // 5% of volume = 5bp impact
+                (0.10, 15.0), // 10% of volume = 15bp impact
+                (0.20, 40.0), // 20% of volume = 40bp impact
             ],
         }
     }

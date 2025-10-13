@@ -1,8 +1,7 @@
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
 use reqwest::Client;
-use shared_models::error::ModelError;
-use tracing::{info, warn, debug};
+use serde::{Deserialize, Serialize};
+use tracing::{debug, info, warn};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct QuoteRequest {
@@ -15,7 +14,7 @@ pub struct QuoteRequest {
     pub slippage_bps: u16,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QuoteResponse {
     #[serde(rename = "outAmount")]
     pub out_amount: String,
@@ -52,10 +51,10 @@ pub struct LiquidityAnalysis {
 
 #[derive(Debug, Clone)]
 pub enum RouteQuality {
-    Excellent,  // Direct route, minimal hops
-    Good,       // 2-3 hops, acceptable slippage
-    Poor,       // Many hops, high slippage
-    Unviable,   // Excessive slippage or no route
+    Excellent, // Direct route, minimal hops
+    Good,      // 2-3 hops, acceptable slippage
+    Poor,      // Many hops, high slippage
+    Unviable,  // Excessive slippage or no route
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -96,16 +95,15 @@ impl JupiterClient {
         }
 
         let url = format!("{}/quote", self.base_url);
-        
-        let response = self.client
-            .get(&url)
-            .query(&request)
-            .send()
-            .await?;
+
+        let response = self.client.get(&url).query(&request).send().await?;
 
         if response.status().is_success() {
             let quote: QuoteResponse = response.json().await?;
-            tracing::debug!("📊 Jupiter quote received: {} output amount", quote.out_amount);
+            tracing::debug!(
+                "📊 Jupiter quote received: {} output amount",
+                quote.out_amount
+            );
             Ok(quote)
         } else {
             let error_text = response.text().await?;
@@ -122,12 +120,8 @@ impl JupiterClient {
         }
 
         let url = format!("{}/swap", self.base_url);
-        
-        let response = self.client
-            .post(&url)
-            .json(&request)
-            .send()
-            .await?;
+
+        let response = self.client.post(&url).json(&request).send().await?;
 
         if response.status().is_success() {
             let swap: SwapResponse = response.json().await?;
@@ -157,15 +151,19 @@ impl JupiterClient {
     }
 
     /// Analyze liquidity for a potential trade (Fix #6: Liquidity & Slippage Analysis)
-    pub async fn analyze_liquidity(&self, 
-        input_mint: &str, 
-        output_mint: &str, 
+    pub async fn analyze_liquidity(
+        &self,
+        input_mint: &str,
+        output_mint: &str,
         amount_usd: f64,
-        max_slippage_bps: u16
+        max_slippage_bps: u16,
     ) -> Result<LiquidityAnalysis> {
-        use tracing::{info, warn, debug};
-        
-        debug!("Analyzing liquidity for ${} trade: {} -> {}", amount_usd, input_mint, output_mint);
+        use tracing::{debug, info, warn};
+
+        debug!(
+            "Analyzing liquidity for ${} trade: {} -> {}",
+            amount_usd, input_mint, output_mint
+        );
 
         if std::env::var("PAPER_TRADING_MODE").unwrap_or_default() == "true" {
             info!("📊 PAPER MODE: Simulating liquidity analysis");
@@ -175,7 +173,11 @@ impl JupiterClient {
                 slippage_tolerance_bps: max_slippage_bps,
                 estimated_slippage_bps: if amount_usd > 1000.0 { 25 } else { 10 },
                 is_liquid_enough: amount_usd < 5000.0,
-                route_quality: if amount_usd < 1000.0 { RouteQuality::Excellent } else { RouteQuality::Good },
+                route_quality: if amount_usd < 1000.0 {
+                    RouteQuality::Excellent
+                } else {
+                    RouteQuality::Good
+                },
             });
         }
 
@@ -184,10 +186,10 @@ impl JupiterClient {
 
         // Test multiple quote sizes to gauge liquidity depth
         let quote_sizes = vec![
-            token_amount / 10,  // 10% of trade
-            token_amount / 2,   // 50% of trade  
-            token_amount,       // Full trade
-            token_amount * 2,   // 2x trade size
+            token_amount / 10, // 10% of trade
+            token_amount / 2,  // 50% of trade
+            token_amount,      // Full trade
+            token_amount * 2,  // 2x trade size
         ];
 
         let mut price_impacts = Vec::new();
@@ -228,7 +230,7 @@ impl JupiterClient {
         // Analyze the results
         let avg_price_impact = price_impacts.iter().sum::<f64>() / price_impacts.len() as f64;
         let max_price_impact = price_impacts.iter().fold(0.0f64, |a, &b| a.max(b));
-        
+
         // Estimate available liquidity based on when price impact becomes excessive
         let available_liquidity_usd = if max_price_impact < 1.0 {
             amount_usd * 5.0 // Good liquidity
@@ -248,7 +250,7 @@ impl JupiterClient {
 
         // Estimate actual slippage (typically higher than price impact)
         let estimated_slippage_bps = ((avg_price_impact * 100.0) + 10.0) as u16;
-        
+
         let analysis = LiquidityAnalysis {
             available_liquidity_usd,
             price_impact_pct: avg_price_impact,
@@ -258,33 +260,38 @@ impl JupiterClient {
             route_quality: quality,
         };
 
-        info!("📊 Liquidity analysis: ${:.0} available, {:.2}% impact, {} quality", 
-              analysis.available_liquidity_usd, 
-              analysis.price_impact_pct,
-              match analysis.route_quality {
-                  RouteQuality::Excellent => "excellent",
-                  RouteQuality::Good => "good", 
-                  RouteQuality::Poor => "poor",
-                  RouteQuality::Unviable => "unviable",
-              });
+        info!(
+            "📊 Liquidity analysis: ${:.0} available, {:.2}% impact, {} quality",
+            analysis.available_liquidity_usd,
+            analysis.price_impact_pct,
+            match analysis.route_quality {
+                RouteQuality::Excellent => "excellent",
+                RouteQuality::Good => "good",
+                RouteQuality::Poor => "poor",
+                RouteQuality::Unviable => "unviable",
+            }
+        );
 
         Ok(analysis)
     }
 
     /// Check if a trade is viable given liquidity constraints
-    pub async fn is_trade_viable(&self,
+    pub async fn is_trade_viable(
+        &self,
         input_mint: &str,
-        output_mint: &str, 
+        output_mint: &str,
         amount_usd: f64,
         max_slippage_bps: u16,
-        min_liquidity_multiple: f64
+        min_liquidity_multiple: f64,
     ) -> Result<bool> {
-        let analysis = self.analyze_liquidity(input_mint, output_mint, amount_usd, max_slippage_bps).await?;
-        
+        let analysis = self
+            .analyze_liquidity(input_mint, output_mint, amount_usd, max_slippage_bps)
+            .await?;
+
         let liquidity_ok = analysis.available_liquidity_usd >= amount_usd * min_liquidity_multiple;
         let slippage_ok = analysis.estimated_slippage_bps <= max_slippage_bps;
         let route_ok = !matches!(analysis.route_quality, RouteQuality::Unviable);
-        
+
         Ok(liquidity_ok && slippage_ok && route_ok)
     }
 }

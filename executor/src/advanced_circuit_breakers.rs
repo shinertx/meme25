@@ -1,40 +1,40 @@
+use chrono::{DateTime, Duration, Utc};
+use serde::{Deserialize, Serialize};
 use shared_models::error::Result;
-use tracing::{info, warn, debug, error};
-use chrono::{DateTime, Utc, Duration};
 use std::collections::{HashMap, VecDeque};
-use serde::{Serialize, Deserialize};
-use tokio::sync::RwLock;
 use std::sync::Arc;
+use tokio::sync::RwLock;
+use tracing::{debug, error, info, warn};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum BreakerType {
-    Portfolio,      // System-wide portfolio protection
-    Strategy,       // Per-strategy limits
-    Position,       // Individual position limits
-    Market,         // Market-wide conditions
-    Volatility,     // Volatility-based limits
-    Correlation,    // Cross-asset correlation limits
-    Liquidity,      // Liquidity-based protection
-    Volume,         // Volume-based limits
-    Drawdown,       // Maximum drawdown protection
-    VaR,           // Value at Risk limits
+    Portfolio,   // System-wide portfolio protection
+    Strategy,    // Per-strategy limits
+    Position,    // Individual position limits
+    Market,      // Market-wide conditions
+    Volatility,  // Volatility-based limits
+    Correlation, // Cross-asset correlation limits
+    Liquidity,   // Liquidity-based protection
+    Volume,      // Volume-based limits
+    Drawdown,    // Maximum drawdown protection
+    VaR,         // Value at Risk limits
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum BreakerSeverity {
-    Warning,    // Soft limit - log warning
-    Throttle,   // Reduce position sizes
-    Pause,      // Pause strategy/system temporarily
-    Stop,       // Hard stop - cease all activity
-    Emergency,  // Emergency stop with immediate liquidation
+    Warning,   // Soft limit - log warning
+    Throttle,  // Reduce position sizes
+    Pause,     // Pause strategy/system temporarily
+    Stop,      // Hard stop - cease all activity
+    Emergency, // Emergency stop with immediate liquidation
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum BreakerState {
-    Armed,      // Normal operation, monitoring
-    Triggered,  // Breaker has been triggered
-    Recovery,   // In recovery mode, gradually resuming
-    Disabled,   // Manually disabled
+    Armed,     // Normal operation, monitoring
+    Triggered, // Breaker has been triggered
+    Recovery,  // In recovery mode, gradually resuming
+    Disabled,  // Manually disabled
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -92,17 +92,17 @@ struct BreakerInstance {
 pub struct AdvancedCircuitBreakers {
     breakers: Arc<RwLock<HashMap<String, BreakerInstance>>>,
     global_emergency_stop: Arc<RwLock<bool>>,
-    
+
     // System state tracking
     portfolio_value: f64,
     portfolio_drawdown: f64,
     market_volatility: f64,
     system_correlation: f64,
-    
+
     // Activity monitoring
     recent_triggers: VecDeque<BreakerTrigger>,
     max_trigger_history: usize,
-    
+
     // Configuration
     emergency_liquidation_threshold: f64,
     cascade_delay_seconds: u64,
@@ -160,13 +160,12 @@ impl AdvancedCircuitBreakers {
                 threshold: -40.0,
                 severity: BreakerSeverity::Emergency,
                 lookback_period_minutes: 10080, // 7 days
-                recovery_time_minutes: 1440, // 24 hours
+                recovery_time_minutes: 1440,    // 24 hours
                 max_triggers_per_hour: 1,
                 enabled: true,
                 auto_recovery: false,
                 cascading_impact: vec!["emergency_liquidation".to_string()],
             },
-            
             // Drawdown Protection
             BreakerConfig {
                 breaker_type: BreakerType::Drawdown,
@@ -181,7 +180,6 @@ impl AdvancedCircuitBreakers {
                 auto_recovery: true,
                 cascading_impact: vec!["reduce_position_sizes".to_string()],
             },
-            
             // Volatility Protection
             BreakerConfig {
                 breaker_type: BreakerType::Volatility,
@@ -196,7 +194,6 @@ impl AdvancedCircuitBreakers {
                 auto_recovery: true,
                 cascading_impact: vec![],
             },
-            
             // VaR Protection
             BreakerConfig {
                 breaker_type: BreakerType::VaR,
@@ -211,7 +208,6 @@ impl AdvancedCircuitBreakers {
                 auto_recovery: true,
                 cascading_impact: vec![],
             },
-            
             // Correlation Protection
             BreakerConfig {
                 breaker_type: BreakerType::Correlation,
@@ -226,7 +222,6 @@ impl AdvancedCircuitBreakers {
                 auto_recovery: true,
                 cascading_impact: vec!["diversification_required".to_string()],
             },
-            
             // Strategy-Level Protection
             BreakerConfig {
                 breaker_type: BreakerType::Strategy,
@@ -247,7 +242,10 @@ impl AdvancedCircuitBreakers {
             self.add_breaker(config).await?;
         }
 
-        info!("Initialized {} advanced circuit breakers", self.breakers.read().await.len());
+        info!(
+            "Initialized {} advanced circuit breakers",
+            self.breakers.read().await.len()
+        );
         Ok(())
     }
 
@@ -279,28 +277,56 @@ impl AdvancedCircuitBreakers {
     ) -> Result<Vec<BreakerTrigger>> {
         self.portfolio_value = current_value;
         self.portfolio_drawdown = drawdown_pct;
-        
+
         let mut triggers = Vec::new();
-        
+
         // Calculate portfolio loss percentage
         let portfolio_loss_pct = ((200.0 - current_value) / 200.0) * 100.0;
-        
+
         // Check portfolio loss breakers
         triggers.extend(
-            self.check_breaker("portfolio_loss_10pct", portfolio_loss_pct).await?
+            self.check_breaker("portfolio_loss_10pct", portfolio_loss_pct)
+                .await?,
         );
         triggers.extend(
-            self.check_breaker("portfolio_loss_25pct", portfolio_loss_pct).await?
+            self.check_breaker("portfolio_loss_25pct", portfolio_loss_pct)
+                .await?,
         );
         triggers.extend(
-            self.check_breaker("portfolio_loss_40pct", portfolio_loss_pct).await?
+            self.check_breaker("portfolio_loss_40pct", portfolio_loss_pct)
+                .await?,
         );
-        
+
         // Check drawdown breakers
         triggers.extend(
-            self.check_breaker("max_drawdown_15pct", drawdown_pct).await?
+            self.check_breaker("max_drawdown_15pct", drawdown_pct)
+                .await?,
         );
-        
+
+        if portfolio_loss_pct >= self.emergency_liquidation_threshold {
+            let emergency_trigger = BreakerTrigger {
+                timestamp: Utc::now(),
+                breaker_name: "emergency_liquidation".to_string(),
+                trigger_value: portfolio_loss_pct,
+                threshold: self.emergency_liquidation_threshold,
+                severity: BreakerSeverity::Emergency,
+                message: format!(
+                    "Emergency liquidation threshold breached: {:.2}% loss",
+                    portfolio_loss_pct
+                ),
+                affected_strategies: Vec::new(),
+                recovery_eta: None,
+            };
+
+            *self.global_emergency_stop.write().await = true;
+            self.recent_triggers.push_back(emergency_trigger.clone());
+            if self.recent_triggers.len() > self.max_trigger_history {
+                self.recent_triggers.pop_front();
+            }
+
+            triggers.push(emergency_trigger);
+        }
+
         Ok(triggers)
     }
 
@@ -312,24 +338,24 @@ impl AdvancedCircuitBreakers {
     ) -> Result<Vec<BreakerTrigger>> {
         self.market_volatility = volatility;
         self.system_correlation = correlation;
-        
+
         let mut triggers = Vec::new();
-        
+
         // Check VaR breakers
-        triggers.extend(
-            self.check_breaker("var_95_exceeded", var_95).await?
-        );
-        
+        triggers.extend(self.check_breaker("var_95_exceeded", var_95).await?);
+
         // Check volatility breakers (convert to percentage)
         triggers.extend(
-            self.check_breaker("high_volatility_500pct", volatility * 100.0).await?
+            self.check_breaker("high_volatility_500pct", volatility * 100.0)
+                .await?,
         );
-        
+
         // Check correlation breakers
         triggers.extend(
-            self.check_breaker("high_correlation_90pct", correlation).await?
+            self.check_breaker("high_correlation_90pct", correlation)
+                .await?,
         );
-        
+
         Ok(triggers)
     }
 
@@ -340,28 +366,32 @@ impl AdvancedCircuitBreakers {
     ) -> Result<Vec<BreakerTrigger>> {
         // Check strategy-specific breakers
         let triggers = self.check_breaker("strategy_loss_30pct", pnl_pct).await?;
-        
+
         // Add strategy context to triggers
         let mut contextualized_triggers = Vec::new();
         for mut trigger in triggers {
             trigger.affected_strategies.push(strategy_id.to_string());
             contextualized_triggers.push(trigger);
         }
-        
+
         Ok(contextualized_triggers)
     }
 
-    async fn check_breaker(&mut self, breaker_name: &str, current_value: f64) -> Result<Vec<BreakerTrigger>> {
+    async fn check_breaker(
+        &mut self,
+        breaker_name: &str,
+        current_value: f64,
+    ) -> Result<Vec<BreakerTrigger>> {
         let mut breakers = self.breakers.write().await;
         let mut triggers = Vec::new();
-        
+
         if let Some(breaker) = breakers.get_mut(breaker_name) {
             if !breaker.config.enabled || breaker.state == BreakerState::Disabled {
                 return Ok(triggers);
             }
-            
+
             breaker.current_value = current_value;
-            
+
             // Update time-based counters
             let now = Utc::now();
             if now > breaker.hour_reset_time {
@@ -372,23 +402,25 @@ impl AdvancedCircuitBreakers {
                 breaker.trigger_count_day = 0;
                 breaker.day_reset_time = now + Duration::days(1);
             }
-            
+
             // Check if breaker should trigger
             let should_trigger = match breaker.config.breaker_type {
                 BreakerType::Portfolio | BreakerType::Strategy | BreakerType::Drawdown => {
                     current_value >= breaker.config.threshold.abs()
-                },
+                }
                 BreakerType::VaR | BreakerType::Volatility | BreakerType::Correlation => {
                     current_value >= breaker.config.threshold
-                },
+                }
                 _ => false,
             };
-            
+
             // Check recovery conditions
             if breaker.state == BreakerState::Recovery {
                 if let Some(recovery_start) = breaker.recovery_start_time {
                     let recovery_duration = now.signed_duration_since(recovery_start);
-                    if recovery_duration.num_minutes() >= breaker.config.recovery_time_minutes as i64 {
+                    if recovery_duration.num_minutes()
+                        >= breaker.config.recovery_time_minutes as i64
+                    {
                         breaker.state = BreakerState::Armed;
                         breaker.recovery_start_time = None;
                         info!("Circuit breaker '{}' recovered and re-armed", breaker_name);
@@ -396,15 +428,17 @@ impl AdvancedCircuitBreakers {
                 }
                 return Ok(triggers); // Don't trigger while in recovery
             }
-            
+
             if should_trigger && breaker.state == BreakerState::Armed {
                 // Check trigger rate limits
                 if breaker.trigger_count_hour >= breaker.config.max_triggers_per_hour {
-                    warn!("Circuit breaker '{}' rate limited (max {} per hour)", 
-                          breaker_name, breaker.config.max_triggers_per_hour);
+                    warn!(
+                        "Circuit breaker '{}' rate limited (max {} per hour)",
+                        breaker_name, breaker.config.max_triggers_per_hour
+                    );
                     return Ok(triggers);
                 }
-                
+
                 // Create trigger
                 let trigger = BreakerTrigger {
                     timestamp: now,
@@ -412,8 +446,10 @@ impl AdvancedCircuitBreakers {
                     trigger_value: current_value,
                     threshold: breaker.config.threshold,
                     severity: breaker.config.severity.clone(),
-                    message: format!("{}: {:.2} exceeds threshold {:.2}", 
-                                   breaker.config.description, current_value, breaker.config.threshold),
+                    message: format!(
+                        "{}: {:.2} exceeds threshold {:.2}",
+                        breaker.config.description, current_value, breaker.config.threshold
+                    ),
                     affected_strategies: vec![],
                     recovery_eta: if breaker.config.auto_recovery {
                         Some(now + Duration::minutes(breaker.config.recovery_time_minutes as i64))
@@ -421,99 +457,118 @@ impl AdvancedCircuitBreakers {
                         None
                     },
                 };
-                
+
                 // Update breaker state
                 breaker.state = BreakerState::Triggered;
                 breaker.last_trigger_time = Some(now);
                 breaker.trigger_count_hour += 1;
                 breaker.trigger_count_day += 1;
                 breaker.trigger_history.push_back(trigger.clone());
-                
+
                 // Limit trigger history
                 while breaker.trigger_history.len() > 100 {
                     breaker.trigger_history.pop_front();
                 }
-                
+
                 // Handle severity-specific actions
                 match trigger.severity {
                     BreakerSeverity::Emergency => {
                         *self.global_emergency_stop.write().await = true;
                         error!("EMERGENCY STOP: {}", trigger.message);
-                    },
+                    }
                     BreakerSeverity::Stop => {
                         warn!("CIRCUIT BREAKER STOP: {}", trigger.message);
-                    },
+                    }
                     BreakerSeverity::Pause => {
                         warn!("CIRCUIT BREAKER PAUSE: {}", trigger.message);
-                    },
+                    }
                     BreakerSeverity::Throttle => {
                         warn!("CIRCUIT BREAKER THROTTLE: {}", trigger.message);
-                    },
+                    }
                     BreakerSeverity::Warning => {
                         warn!("CIRCUIT BREAKER WARNING: {}", trigger.message);
-                    },
+                    }
                 }
-                
+
                 // Start recovery if auto-recovery enabled
                 if breaker.config.auto_recovery {
                     breaker.state = BreakerState::Recovery;
                     breaker.recovery_start_time = Some(now);
                 }
-                
+
                 triggers.push(trigger.clone());
-                
+
                 // Collect cascade targets before releasing the lock
                 let cascade_targets = breaker.config.cascading_impact.clone();
-                
+
                 // Add to recent triggers
                 self.recent_triggers.push_back(trigger.clone());
                 while self.recent_triggers.len() > self.max_trigger_history {
                     self.recent_triggers.pop_front();
                 }
-                
+
                 // Release the lock before handling cascades
                 drop(breakers);
-                
+
                 // Handle cascading triggers after releasing the lock
                 for cascade_breaker in &cascade_targets {
                     self.trigger_cascade(cascade_breaker, &trigger).await?;
                 }
             }
         }
-        
+
         Ok(triggers)
     }
 
-    async fn trigger_cascade(&mut self, cascade_target: &str, source_trigger: &BreakerTrigger) -> Result<()> {
+    async fn trigger_cascade(
+        &mut self,
+        cascade_target: &str,
+        source_trigger: &BreakerTrigger,
+    ) -> Result<()> {
         // Artificial delay to prevent cascade loops
         tokio::time::sleep(tokio::time::Duration::from_secs(self.cascade_delay_seconds)).await;
-        
+
         match cascade_target {
             "emergency_liquidation" => {
                 *self.global_emergency_stop.write().await = true;
-                error!("CASCADE: Emergency liquidation triggered by {}", source_trigger.breaker_name);
-            },
+                error!(
+                    "CASCADE: Emergency liquidation triggered by {}",
+                    source_trigger.breaker_name
+                );
+            }
             "all_strategies_pause" => {
-                warn!("CASCADE: All strategies paused by {}", source_trigger.breaker_name);
+                warn!(
+                    "CASCADE: All strategies paused by {}",
+                    source_trigger.breaker_name
+                );
                 // In real implementation, would signal strategy manager
-            },
+            }
             "reduce_position_sizes" => {
-                warn!("CASCADE: Position size reduction triggered by {}", source_trigger.breaker_name);
+                warn!(
+                    "CASCADE: Position size reduction triggered by {}",
+                    source_trigger.breaker_name
+                );
                 // In real implementation, would signal position sizer
-            },
+            }
             "diversification_required" => {
-                warn!("CASCADE: Diversification required by {}", source_trigger.breaker_name);
+                warn!(
+                    "CASCADE: Diversification required by {}",
+                    source_trigger.breaker_name
+                );
                 // In real implementation, would signal portfolio rebalancer
-            },
+            }
             _ => {
                 // Try to trigger another named breaker
                 if let Some(_) = self.breakers.read().await.get(cascade_target) {
-                    debug!("CASCADE: Triggering breaker {} from {}", cascade_target, source_trigger.breaker_name);
+                    debug!(
+                        "CASCADE: Triggering breaker {} from {}",
+                        cascade_target, source_trigger.breaker_name
+                    );
                     // Recursive cascade - would implement carefully in production
                 }
             }
         }
-        
+
         Ok(())
     }
 
@@ -547,15 +602,18 @@ impl AdvancedCircuitBreakers {
         let breakers = self.breakers.read().await;
         let mut status = HashMap::new();
         let now = Utc::now();
-        
+
         for (name, breaker) in breakers.iter() {
-            let time_since_trigger = breaker.last_trigger_time
+            let time_since_trigger = breaker
+                .last_trigger_time
                 .map(|t| now.signed_duration_since(t).num_minutes());
-            
+
             let utilization = if breaker.config.threshold != 0.0 {
                 (breaker.current_value / breaker.config.threshold.abs() * 100.0).min(100.0)
-            } else { 0.0 };
-            
+            } else {
+                0.0
+            };
+
             let metrics = BreakerMetrics {
                 current_value: breaker.current_value,
                 threshold: breaker.config.threshold,
@@ -565,15 +623,16 @@ impl AdvancedCircuitBreakers {
                 time_since_last_trigger_minutes: time_since_trigger,
                 state: breaker.state.clone(),
             };
-            
+
             status.insert(name.clone(), metrics);
         }
-        
+
         status
     }
 
     pub async fn get_recent_triggers(&self, limit: usize) -> Vec<BreakerTrigger> {
-        self.recent_triggers.iter()
+        self.recent_triggers
+            .iter()
             .rev()
             .take(limit)
             .cloned()
@@ -584,14 +643,14 @@ impl AdvancedCircuitBreakers {
         let status = self.get_breaker_status().await;
         let emergency_active = self.is_emergency_stop_active().await;
         let recent_triggers = self.get_recent_triggers(10).await;
-        
+
         let mut report = String::new();
         report.push_str("=== Advanced Circuit Breaker Status ===\n\n");
-        
+
         if emergency_active {
             report.push_str("🚨 EMERGENCY STOP ACTIVE 🚨\n\n");
         }
-        
+
         report.push_str("📊 Breaker Status:\n");
         for (name, metrics) in status {
             let status_icon = match metrics.state {
@@ -600,14 +659,18 @@ impl AdvancedCircuitBreakers {
                 BreakerState::Recovery => "🟡",
                 BreakerState::Disabled => "⚫",
             };
-            
+
             report.push_str(&format!(
                 "{} {}: {:.2}/{:.2} ({:.1}%) - {} triggers today\n",
-                status_icon, name, metrics.current_value, metrics.threshold,
-                metrics.utilization_pct, metrics.triggers_today
+                status_icon,
+                name,
+                metrics.current_value,
+                metrics.threshold,
+                metrics.utilization_pct,
+                metrics.triggers_today
             ));
         }
-        
+
         if !recent_triggers.is_empty() {
             report.push_str("\n🚨 Recent Triggers:\n");
             for trigger in recent_triggers.iter().take(5) {
@@ -627,13 +690,25 @@ impl AdvancedCircuitBreakers {
                 ));
             }
         }
-        
+
         report.push_str(&format!("\nSystem State:\n"));
-        report.push_str(&format!("• Portfolio Value: ${:.2}\n", self.portfolio_value));
-        report.push_str(&format!("• Portfolio Drawdown: {:.2}%\n", self.portfolio_drawdown));
-        report.push_str(&format!("• Market Volatility: {:.1}%\n", self.market_volatility * 100.0));
-        report.push_str(&format!("• System Correlation: {:.2}\n", self.system_correlation));
-        
+        report.push_str(&format!(
+            "• Portfolio Value: ${:.2}\n",
+            self.portfolio_value
+        ));
+        report.push_str(&format!(
+            "• Portfolio Drawdown: {:.2}%\n",
+            self.portfolio_drawdown
+        ));
+        report.push_str(&format!(
+            "• Market Volatility: {:.1}%\n",
+            self.market_volatility * 100.0
+        ));
+        report.push_str(&format!(
+            "• System Correlation: {:.2}\n",
+            self.system_correlation
+        ));
+
         report
     }
 }

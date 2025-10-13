@@ -1,13 +1,43 @@
-FROM rust:1.75 as builder
+# syntax=docker/dockerfile:1.6
 
+FROM rustlang/rust:nightly-slim AS base
 WORKDIR /app
-COPY ./shared-models /app/shared-models
-COPY ./position_manager /app/position_manager
-RUN cargo build -p position_manager --release
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends pkg-config libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+RUN cargo install cargo-chef --locked
 
-FROM gcr.io/distroless/cc
-COPY --from=builder /app/target/release/position_manager /usr/local/bin/position_manager
-ENTRYPOINT ["position_manager"]
-RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
-COPY --from=builder /app/target/release/position_manager /usr/local/bin/
-CMD ["position_manager"]
+FROM base AS planner
+COPY Cargo.toml Cargo.lock ./
+COPY backtest_engine ./backtest_engine
+COPY executor ./executor
+COPY market_data_gateway ./market_data_gateway
+COPY portfolio_manager ./portfolio_manager
+COPY position_manager ./position_manager
+COPY shared-models ./shared-models
+COPY signer ./signer
+COPY strategy_factory ./strategy_factory
+COPY tests ./tests
+RUN cargo chef prepare --recipe-path recipe.json
+
+FROM base AS builder
+COPY --from=planner /app/recipe.json recipe.json
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    --mount=type=cache,target=/app/target \
+    cargo chef cook --release --recipe-path recipe.json
+
+COPY . .
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    --mount=type=cache,target=/app/target \
+    cargo build --release --locked --package position_manager --bin position_manager \
+    && cp /app/target/release/position_manager /app/position_manager
+
+FROM debian:bookworm-slim AS runtime
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+COPY --from=builder /app/position_manager /usr/local/bin/position_manager
+ENTRYPOINT ["/usr/local/bin/position_manager"]

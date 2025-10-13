@@ -39,27 +39,27 @@ services:
           memory: 1G
           cpus: '0.5'
 
-  signer:
-    build: 
-      context: .
-      dockerfile: ./signer/Dockerfile
-    restart: unless-stopped
-    depends_on:
-      redis:
-        condition: service_healthy
-      vault:
-        condition: service_healthy
-    environment:
-      - RUST_LOG=${LOG_LEVEL:-info}
-      - VAULT_ADDR=${VAULT_ADDR:-http://vault:8200}
-      - VAULT_TOKEN=${VAULT_TOKEN}
-    ports:
-      - "50051:50051"
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:50051/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+  # signer:  # Disabled for paper trading - incompatible zeroize version
+  #   build: 
+  #     context: .
+  #     dockerfile: ./signer/Dockerfile
+  #   restart: unless-stopped
+  #   depends_on:
+  #     redis:
+  #       condition: service_healthy
+  #     vault:
+  #       condition: service_healthy
+  #   environment:
+  #     - RUST_LOG=${LOG_LEVEL:-info}
+  #     - VAULT_ADDR=${VAULT_ADDR:-http://vault:8200}
+  #     - VAULT_TOKEN=${VAULT_TOKEN}
+  #   ports:
+  #     - "50051:50051"
+  #   healthcheck:
+  #     test: ["CMD", "curl", "-f", "http://localhost:50051/health"]
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 3
 
   vault:
     image: hashicorp/vault:1.15
@@ -104,7 +104,9 @@ services:
           cpus: '1.0'
 
   strategy_factory:
-    build: ./strategy_factory
+    build:
+      context: .
+      dockerfile: ./strategy_factory/Dockerfile
     restart: unless-stopped
     depends_on:
       redis:
@@ -129,7 +131,9 @@ services:
           cpus: '0.5'
 
   portfolio_manager:
-    build: ./portfolio_manager
+    build:
+      context: .
+      dockerfile: ./portfolio_manager/Dockerfile
     restart: unless-stopped
     depends_on:
       redis:
@@ -196,8 +200,8 @@ services:
         condition: service_healthy
       postgres:
         condition: service_healthy
-      signer:
-        condition: service_healthy
+      # signer:
+      #   condition: service_healthy
       portfolio_manager:
         condition: service_started
       market_data_gateway:

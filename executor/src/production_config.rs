@@ -1,7 +1,7 @@
-use shared_models::error::{Result, ModelError};
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
+use shared_models::error::{ModelError, Result};
 use std::collections::HashMap;
-use tracing::{info, warn, error};
+use tracing::{error, info, warn};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProductionConfig {
@@ -27,7 +27,7 @@ pub struct DeploymentConfig {
     pub graceful_shutdown_timeout_seconds: u32,
     pub max_memory_mb: u32,
     pub max_cpu_cores: f32,
-    pub restart_policy: String, // "Always", "OnFailure", "Never"
+    pub restart_policy: String,      // "Always", "OnFailure", "Never"
     pub deployment_strategy: String, // "RollingUpdate", "BlueGreen", "Canary"
 }
 
@@ -107,7 +107,7 @@ pub struct PerformanceConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LoggingConfig {
-    pub level: String, // "trace", "debug", "info", "warn", "error"
+    pub level: String,  // "trace", "debug", "info", "warn", "error"
     pub format: String, // "json", "pretty", "compact"
     pub output: String, // "stdout", "file", "both"
     pub file_path: String,
@@ -166,14 +166,18 @@ pub struct AlertConfig {
 
 impl ProductionConfig {
     pub fn load() -> Result<Self> {
-        let environment = std::env::var("DEPLOYMENT_ENV").unwrap_or_else(|_| "development".to_string());
-        
+        let environment =
+            std::env::var("DEPLOYMENT_ENV").unwrap_or_else(|_| "development".to_string());
+
         match environment.as_str() {
             "production" => Self::production_config(),
             "staging" => Self::staging_config(),
             "development" => Self::development_config(),
             _ => {
-                warn!("Unknown environment '{}', using development config", environment);
+                warn!(
+                    "Unknown environment '{}', using development config",
+                    environment
+                );
                 Self::development_config()
             }
         }
@@ -181,7 +185,7 @@ impl ProductionConfig {
 
     pub fn production_config() -> Result<Self> {
         info!("Loading production configuration");
-        
+
         Ok(ProductionConfig {
             deployment: DeploymentConfig {
                 environment: "production".to_string(),
@@ -197,8 +201,12 @@ impl ProductionConfig {
             },
             database: DatabaseConfig {
                 host: std::env::var("DB_HOST").unwrap_or_else(|_| "localhost".to_string()),
-                port: std::env::var("DB_PORT").unwrap_or_else(|_| "5432".to_string()).parse().unwrap_or(5432),
-                database: std::env::var("DB_NAME").unwrap_or_else(|_| "meme_snipe_prod".to_string()),
+                port: std::env::var("DB_PORT")
+                    .unwrap_or_else(|_| "5432".to_string())
+                    .parse()
+                    .unwrap_or(5432),
+                database: std::env::var("DB_NAME")
+                    .unwrap_or_else(|_| "meme_snipe_prod".to_string()),
                 username: std::env::var("DB_USER").unwrap_or_else(|_| "meme_snipe".to_string()),
                 password_env_var: "DB_PASSWORD".to_string(),
                 ssl_mode: "require".to_string(),
@@ -209,19 +217,32 @@ impl ProductionConfig {
                 read_replicas: vec![
                     std::env::var("DB_READ_REPLICA_1").unwrap_or_default(),
                     std::env::var("DB_READ_REPLICA_2").unwrap_or_default(),
-                ].into_iter().filter(|s| !s.is_empty()).collect(),
+                ]
+                .into_iter()
+                .filter(|s| !s.is_empty())
+                .collect(),
                 migration_on_startup: false,
             },
             redis: RedisConfig {
                 host: std::env::var("REDIS_HOST").unwrap_or_else(|_| "localhost".to_string()),
-                port: std::env::var("REDIS_PORT").unwrap_or_else(|_| "6379".to_string()).parse().unwrap_or(6379),
+                port: std::env::var("REDIS_PORT")
+                    .unwrap_or_else(|_| "6379".to_string())
+                    .parse()
+                    .unwrap_or(6379),
                 password_env_var: "REDIS_PASSWORD".to_string(),
                 ssl_enabled: true,
                 max_connections: 100,
                 connection_timeout_seconds: 10,
-                cluster_mode: std::env::var("REDIS_CLUSTER").unwrap_or_else(|_| "false".to_string()).parse().unwrap_or(false),
-                cluster_nodes: std::env::var("REDIS_CLUSTER_NODES").unwrap_or_default()
-                    .split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect(),
+                cluster_mode: std::env::var("REDIS_CLUSTER")
+                    .unwrap_or_else(|_| "false".to_string())
+                    .parse()
+                    .unwrap_or(false),
+                cluster_nodes: std::env::var("REDIS_CLUSTER_NODES")
+                    .unwrap_or_default()
+                    .split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect(),
                 sentinel_mode: false,
                 sentinel_master_name: "mymaster".to_string(),
                 key_prefix: "meme_snipe:prod:".to_string(),
@@ -239,21 +260,34 @@ impl ProductionConfig {
                 tls_cert_path: "/etc/ssl/certs/memesnipe.crt".to_string(),
                 tls_key_path: "/etc/ssl/private/memesnipe.key".to_string(),
                 oauth_providers: HashMap::from([
-                    ("google".to_string(), std::env::var("GOOGLE_CLIENT_ID").unwrap_or_default()),
-                    ("github".to_string(), std::env::var("GITHUB_CLIENT_ID").unwrap_or_default()),
+                    (
+                        "google".to_string(),
+                        std::env::var("GOOGLE_CLIENT_ID").unwrap_or_default(),
+                    ),
+                    (
+                        "github".to_string(),
+                        std::env::var("GITHUB_CLIENT_ID").unwrap_or_default(),
+                    ),
                 ]),
-                ip_whitelist: std::env::var("IP_WHITELIST").unwrap_or_default()
-                    .split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect(),
+                ip_whitelist: std::env::var("IP_WHITELIST")
+                    .unwrap_or_default()
+                    .split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect(),
                 enable_request_signing: true,
             },
             monitoring: MonitoringConfig {
                 prometheus_port: 9090,
                 prometheus_path: "/metrics".to_string(),
-                jaeger_endpoint: std::env::var("JAEGER_ENDPOINT").unwrap_or_else(|_| "http://jaeger:14268/api/traces".to_string()),
+                jaeger_endpoint: std::env::var("JAEGER_ENDPOINT")
+                    .unwrap_or_else(|_| "http://jaeger:14268/api/traces".to_string()),
                 health_check_port: 8080,
                 metrics_retention_days: 90,
-                alert_manager_url: std::env::var("ALERTMANAGER_URL").unwrap_or_else(|_| "http://alertmanager:9093".to_string()),
-                grafana_dashboard_url: std::env::var("GRAFANA_URL").unwrap_or_else(|_| "https://grafana.memesnipe.com".to_string()),
+                alert_manager_url: std::env::var("ALERTMANAGER_URL")
+                    .unwrap_or_else(|_| "http://alertmanager:9093".to_string()),
+                grafana_dashboard_url: std::env::var("GRAFANA_URL")
+                    .unwrap_or_else(|_| "https://grafana.memesnipe.com".to_string()),
                 sentry_dsn_env_var: "SENTRY_DSN".to_string(),
                 enable_distributed_tracing: true,
                 custom_metrics: HashMap::from([
@@ -291,9 +325,12 @@ impl ProductionConfig {
                 grpc_port: 8002,
                 admin_port: 8003,
                 bind_address: "0.0.0.0".to_string(),
-                external_hostname: std::env::var("EXTERNAL_HOSTNAME").unwrap_or_else(|_| "api.memesnipe.com".to_string()),
-                load_balancer_url: std::env::var("LOAD_BALANCER_URL").unwrap_or_else(|_| "https://lb.memesnipe.com".to_string()),
-                cdn_url: std::env::var("CDN_URL").unwrap_or_else(|_| "https://cdn.memesnipe.com".to_string()),
+                external_hostname: std::env::var("EXTERNAL_HOSTNAME")
+                    .unwrap_or_else(|_| "api.memesnipe.com".to_string()),
+                load_balancer_url: std::env::var("LOAD_BALANCER_URL")
+                    .unwrap_or_else(|_| "https://lb.memesnipe.com".to_string()),
+                cdn_url: std::env::var("CDN_URL")
+                    .unwrap_or_else(|_| "https://cdn.memesnipe.com".to_string()),
                 timeout_seconds: 30,
                 max_request_size_mb: 10,
             },
@@ -310,18 +347,30 @@ impl ProductionConfig {
                 s3_secret_key_env_var: Some("BACKUP_S3_SECRET_KEY".to_string()),
             },
             alerts: AlertConfig {
-                smtp_host: std::env::var("SMTP_HOST").unwrap_or_else(|_| "smtp.gmail.com".to_string()),
-                smtp_port: std::env::var("SMTP_PORT").unwrap_or_else(|_| "587".to_string()).parse().unwrap_or(587),
+                smtp_host: std::env::var("SMTP_HOST")
+                    .unwrap_or_else(|_| "smtp.gmail.com".to_string()),
+                smtp_port: std::env::var("SMTP_PORT")
+                    .unwrap_or_else(|_| "587".to_string())
+                    .parse()
+                    .unwrap_or(587),
                 smtp_username: std::env::var("SMTP_USERNAME").unwrap_or_default(),
                 smtp_password_env_var: "SMTP_PASSWORD".to_string(),
-                smtp_from_address: std::env::var("SMTP_FROM").unwrap_or_else(|_| "alerts@memesnipe.com".to_string()),
-                alert_recipients: std::env::var("ALERT_RECIPIENTS").unwrap_or_default()
-                    .split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect(),
+                smtp_from_address: std::env::var("SMTP_FROM")
+                    .unwrap_or_else(|_| "alerts@memesnipe.com".to_string()),
+                alert_recipients: std::env::var("ALERT_RECIPIENTS")
+                    .unwrap_or_default()
+                    .split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect(),
                 slack_webhook_env_var: "SLACK_WEBHOOK_URL".to_string(),
                 discord_webhook_env_var: "DISCORD_WEBHOOK_URL".to_string(),
                 telegram_bot_token_env_var: "TELEGRAM_BOT_TOKEN".to_string(),
                 telegram_chat_id: std::env::var("TELEGRAM_CHAT_ID").unwrap_or_default(),
-                enable_sms: std::env::var("ENABLE_SMS").unwrap_or_else(|_| "false".to_string()).parse().unwrap_or(false),
+                enable_sms: std::env::var("ENABLE_SMS")
+                    .unwrap_or_else(|_| "false".to_string())
+                    .parse()
+                    .unwrap_or(false),
                 sms_provider: "twilio".to_string(),
                 sms_api_key_env_var: "TWILIO_API_KEY".to_string(),
             },
@@ -330,9 +379,9 @@ impl ProductionConfig {
 
     pub fn staging_config() -> Result<Self> {
         info!("Loading staging configuration");
-        
+
         let mut config = Self::production_config()?;
-        
+
         // Override staging-specific settings
         config.deployment.environment = "staging".to_string();
         config.deployment.replicas = 2;
@@ -346,13 +395,13 @@ impl ProductionConfig {
         config.monitoring.metrics_retention_days = 30;
         config.logging.level = "debug".to_string();
         config.backup.backup_retention_days = 30;
-        
+
         Ok(config)
     }
 
     pub fn development_config() -> Result<Self> {
         info!("Loading development configuration");
-        
+
         Ok(ProductionConfig {
             deployment: DeploymentConfig {
                 environment: "development".to_string(),
@@ -489,7 +538,7 @@ impl ProductionConfig {
 
     pub fn validate(&self) -> Result<()> {
         info!("Validating production configuration");
-        
+
         // Validate required environment variables exist
         let required_env_vars = match self.deployment.environment.as_str() {
             "production" => vec![
@@ -511,21 +560,30 @@ impl ProductionConfig {
         for env_var in required_env_vars {
             if std::env::var(env_var).is_err() {
                 error!("Required environment variable '{}' is not set", env_var);
-                return Err(ModelError::Config(format!("Missing required environment variable: {}", env_var)));
+                return Err(ModelError::Config(format!(
+                    "Missing required environment variable: {}",
+                    env_var
+                )));
             }
         }
 
         // Validate configuration values
         if self.deployment.replicas == 0 {
-            return Err(ModelError::Config("Deployment replicas must be greater than 0".to_string()));
+            return Err(ModelError::Config(
+                "Deployment replicas must be greater than 0".to_string(),
+            ));
         }
 
         if self.database.max_connections == 0 {
-            return Err(ModelError::Config("Database max_connections must be greater than 0".to_string()));
+            return Err(ModelError::Config(
+                "Database max_connections must be greater than 0".to_string(),
+            ));
         }
 
         if self.networking.http_port == 0 {
-            return Err(ModelError::Config("HTTP port must be greater than 0".to_string()));
+            return Err(ModelError::Config(
+                "HTTP port must be greater than 0".to_string(),
+            ));
         }
 
         // Validate network ports don't conflict
@@ -537,11 +595,14 @@ impl ProductionConfig {
             self.monitoring.prometheus_port,
             self.monitoring.health_check_port,
         ];
-        
+
         let mut unique_ports = std::collections::HashSet::new();
         for port in ports {
             if !unique_ports.insert(port) {
-                return Err(ModelError::Config(format!("Port {} is used by multiple services", port)));
+                return Err(ModelError::Config(format!(
+                    "Port {} is used by multiple services",
+                    port
+                )));
             }
         }
 
@@ -554,7 +615,8 @@ impl ProductionConfig {
     }
 
     pub fn generate_docker_compose(&self) -> Result<String> {
-        let compose = format!(r#"version: '3.8'
+        let compose = format!(
+            r#"version: '3.8'
 
 services:
   executor:
@@ -688,7 +750,8 @@ networks:
     }
 
     pub fn generate_kubernetes_manifests(&self) -> Result<String> {
-        let manifests = format!(r#"apiVersion: apps/v1
+        let manifests = format!(
+            r#"apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: memesnipe-executor
@@ -864,7 +927,8 @@ spec:
     }
 
     pub fn generate_systemd_service(&self) -> Result<String> {
-        let service = format!(r#"[Unit]
+        let service = format!(
+            r#"[Unit]
 Description=MemeSnipe v25 Executor
 After=network.target postgresql.service redis.service
 Wants=postgresql.service redis.service
@@ -942,7 +1006,11 @@ WantedBy=multi-user.target
             self.database.ssl_mode,
             self.redis.host,
             self.redis.port,
-            if self.redis.ssl_enabled { "enabled" } else { "disabled" },
+            if self.redis.ssl_enabled {
+                "enabled"
+            } else {
+                "disabled"
+            },
             self.networking.bind_address,
             self.networking.http_port,
             self.networking.bind_address,
@@ -952,7 +1020,11 @@ WantedBy=multi-user.target
             self.logging.level,
             self.logging.format,
             self.security.cors_allowed_origins.len(),
-            if self.backup.enabled { "enabled" } else { "disabled" },
+            if self.backup.enabled {
+                "enabled"
+            } else {
+                "disabled"
+            },
             self.backup.backup_retention_days,
             self.alerts.alert_recipients.len(),
             self.deployment.max_memory_mb,

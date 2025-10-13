@@ -1,10 +1,10 @@
-use shared_models::error::{Result, ModelError};
-use tracing::{info, warn, debug};
-use chrono::{DateTime, Utc, Duration};
+use chrono::{DateTime, Duration, Utc};
+use rand::{seq::SliceRandom, thread_rng, Rng};
+use serde::{Deserialize, Serialize};
+use shared_models::error::Result;
+use shared_models::{StrategyPerformance, StrategySpec};
 use std::collections::{HashMap, VecDeque};
-use serde::{Serialize, Deserialize};
-use rand::{thread_rng, Rng, seq::SliceRandom};
-use shared_models::{StrategySpec, StrategyPerformance};
+use tracing::{debug, info};
 
 /// Automated strategy evolution using genetic algorithms and machine learning
 #[derive(Debug)]
@@ -13,25 +13,25 @@ pub struct StrategyEvolution {
     current_population: Vec<EvolutionCandidate>,
     population_size: usize,
     elite_size: usize,
-    
+
     // Performance tracking
     performance_history: HashMap<String, Vec<PerformanceRecord>>,
     fitness_scores: HashMap<String, f64>,
-    
+
     // Evolution parameters
     mutation_rate: f64,
     crossover_rate: f64,
     _selection_pressure: f64,
-    
+
     // Machine learning components
     _feature_extractors: Vec<FeatureExtractor>,
     _performance_predictors: HashMap<String, PerformancePredictor>,
-    
+
     // Strategy lifecycle
     strategy_generations: HashMap<String, u32>,
     _survival_threshold: f64,
     _max_generations: u32,
-    
+
     // Evolution history
     evolution_history: VecDeque<EvolutionEpoch>,
     last_evolution: DateTime<Utc>,
@@ -225,22 +225,22 @@ impl StrategyEvolution {
             fitness_scores: HashMap::new(),
             mutation_rate: 0.15,      // 15% mutation rate
             crossover_rate: 0.7,      // 70% crossover rate
-            _selection_pressure: 2.0,  // Tournament selection pressure
+            _selection_pressure: 2.0, // Tournament selection pressure
             _feature_extractors: Self::initialize_feature_extractors(),
             _performance_predictors: HashMap::new(),
             strategy_generations: HashMap::new(),
-            _survival_threshold: 0.1,   // Bottom 10% eliminated
+            _survival_threshold: 0.1, // Bottom 10% eliminated
             _max_generations: 100,
             evolution_history: VecDeque::with_capacity(1000),
             last_evolution: Utc::now() - Duration::hours(24), // Force first evolution
-            evolution_frequency: Duration::hours(6), // Evolve every 6 hours
+            evolution_frequency: Duration::hours(6),          // Evolve every 6 hours
         }
     }
 
     /// Initialize the population with seed strategies
     pub fn initialize_population(&mut self, seed_strategies: Vec<StrategySpec>) -> Result<()> {
         self.current_population.clear();
-        
+
         for spec in seed_strategies {
             let candidate = EvolutionCandidate {
                 strategy_id: spec.id.clone(),
@@ -253,14 +253,15 @@ impl StrategyEvolution {
                 last_update: Utc::now(),
                 performance_metrics: CandidateMetrics::default(),
             };
-            
+
             self.current_population.push(candidate);
             self.strategy_generations.insert(spec.id, 0);
         }
 
         // Fill remaining slots with mutated versions of seeds
         while self.current_population.len() < self.population_size {
-            if let Some(base_candidate) = self.current_population.choose(&mut thread_rng()).cloned() {
+            if let Some(base_candidate) = self.current_population.choose(&mut thread_rng()).cloned()
+            {
                 let mutated = self.mutate_strategy(&base_candidate)?;
                 self.current_population.push(mutated);
             }
@@ -299,10 +300,10 @@ impl StrategyEvolution {
 
         // Update candidate metrics if in population - handle borrowing carefully
         let strategy_id_str = strategy_id;
-        
+
         // Calculate stability score first (no mutable borrow)
         let stability_score = self.calculate_stability_score(&strategy_id_str);
-        
+
         // Create metrics struct
         let new_metrics = CandidateMetrics {
             sharpe_ratio: performance.sharpe_ratio,
@@ -313,19 +314,22 @@ impl StrategyEvolution {
             volatility: 0.0, // Not available in StrategyPerformance
             calmar_ratio: if performance.max_drawdown_pct > 0.0 {
                 performance.total_pnl_usd / performance.max_drawdown_pct
-            } else { 0.0 },
+            } else {
+                0.0
+            },
             sortino_ratio: performance.sortino_ratio,
             stability_score,
         };
-        
+
         // Calculate fitness score (no mutable borrow)
         let fitness_score = self.calculate_fitness_score(&new_metrics);
-        
+
         // Now update the candidate with mutable borrow
-        if let Some(candidate) = self.current_population
+        if let Some(candidate) = self
+            .current_population
             .iter_mut()
-            .find(|c| c.strategy_id == strategy_id_str) {
-            
+            .find(|c| c.strategy_id == strategy_id_str)
+        {
             candidate.performance_metrics = new_metrics;
             candidate.fitness_score = fitness_score;
             candidate.last_update = Utc::now();
@@ -347,16 +351,18 @@ impl StrategyEvolution {
     }
 
     /// Perform evolution step
-    pub fn evolve(&mut self, current_market_conditions: MarketConditions) -> Result<EvolutionReport> {
+    pub fn evolve(
+        &mut self,
+        current_market_conditions: MarketConditions,
+    ) -> Result<EvolutionReport> {
         info!("Starting strategy evolution process");
 
         // Calculate fitness scores for all candidates
         self.update_all_fitness_scores();
 
         // Sort population by fitness (descending)
-        self.current_population.sort_by(|a, b| 
-            b.fitness_score.partial_cmp(&a.fitness_score).unwrap()
-        );
+        self.current_population
+            .sort_by(|a, b| b.fitness_score.partial_cmp(&a.fitness_score).unwrap());
 
         // Record current population stats
         let epoch = self.create_evolution_epoch(&current_market_conditions);
@@ -376,18 +382,17 @@ impl StrategyEvolution {
             candidate.age_generations += 1;
         }
 
-        let mut strategies_eliminated = 0;
         let mut new_strategies_created = 0;
 
         // Generate new strategies to fill population
         while new_population.len() < self.population_size {
             let mut rng = thread_rng();
-            
+
             if rng.gen::<f64>() < self.crossover_rate && new_population.len() >= 2 {
                 // Crossover: Create child from two parents
                 let parent1 = self.tournament_selection(&new_population)?;
                 let parent2 = self.tournament_selection(&new_population)?;
-                
+
                 if parent1.strategy_id != parent2.strategy_id {
                     let child = self.crossover_strategies(&parent1, &parent2)?;
                     new_population.push(child);
@@ -403,7 +408,7 @@ impl StrategyEvolution {
         }
 
         // Calculate elimination count
-        strategies_eliminated = self.current_population.len() - elite_count;
+        let strategies_eliminated = self.current_population.len() - elite_count;
 
         // Update population
         self.current_population = new_population;
@@ -431,10 +436,10 @@ impl StrategyEvolution {
     /// Get strategies that should be deployed for live trading
     pub fn get_deployment_candidates(&self, count: usize) -> Vec<EvolutionCandidate> {
         let mut candidates = self.current_population.clone();
-        
+
         // Sort by fitness score
         candidates.sort_by(|a, b| b.fitness_score.partial_cmp(&a.fitness_score).unwrap());
-        
+
         // Take top performers with minimum fitness threshold
         candidates
             .into_iter()
@@ -496,9 +501,13 @@ impl StrategyEvolution {
         let drawdown_penalty = -metrics.max_drawdown * 0.15;
         let win_rate_component = metrics.win_rate * 0.15;
         let stability_component = metrics.stability_score * 0.15;
-        
-        (return_component + risk_adjusted_component + drawdown_penalty + 
-         win_rate_component + stability_component).max(0.0)
+
+        (return_component
+            + risk_adjusted_component
+            + drawdown_penalty
+            + win_rate_component
+            + stability_component)
+            .max(0.0)
     }
 
     fn calculate_stability_score(&self, strategy_id: &str) -> f64 {
@@ -508,18 +517,18 @@ impl StrategyEvolution {
             }
 
             // Calculate consistency of performance
-            let returns: Vec<f64> = history.windows(2)
-                .map(|w| w[1].pnl - w[0].pnl)
-                .collect();
+            let returns: Vec<f64> = history.windows(2).map(|w| w[1].pnl - w[0].pnl).collect();
 
             if returns.is_empty() {
                 return 0.5;
             }
 
             let mean_return = returns.iter().sum::<f64>() / returns.len() as f64;
-            let variance = returns.iter()
+            let variance = returns
+                .iter()
                 .map(|r| (r - mean_return).powi(2))
-                .sum::<f64>() / returns.len() as f64;
+                .sum::<f64>()
+                / returns.len() as f64;
 
             // Higher stability = lower variance relative to mean
             if variance > 0.0 && mean_return.abs() > 0.0 {
@@ -534,7 +543,8 @@ impl StrategyEvolution {
 
     fn update_all_fitness_scores(&mut self) {
         // Collect fitness scores first to avoid borrowing issues
-        let fitness_updates: Vec<(String, f64)> = self.current_population
+        let fitness_updates: Vec<(String, f64)> = self
+            .current_population
             .iter()
             .map(|candidate| {
                 let fitness = self.calculate_fitness_score(&candidate.performance_metrics);
@@ -544,25 +554,30 @@ impl StrategyEvolution {
 
         // Update the candidates with new fitness scores
         for (strategy_id, fitness) in fitness_updates {
-            if let Some(candidate) = self.current_population
+            if let Some(candidate) = self
+                .current_population
                 .iter_mut()
-                .find(|c| c.strategy_id == strategy_id) {
+                .find(|c| c.strategy_id == strategy_id)
+            {
                 candidate.fitness_score = fitness;
             }
             self.fitness_scores.insert(strategy_id, fitness);
         }
     }
 
-    fn tournament_selection(&self, population: &[EvolutionCandidate]) -> Result<EvolutionCandidate> {
+    fn tournament_selection(
+        &self,
+        population: &[EvolutionCandidate],
+    ) -> Result<EvolutionCandidate> {
         let tournament_size = (population.len() as f64 * 0.1).max(2.0) as usize;
         let mut rng = thread_rng();
-        
+
         let mut tournament: Vec<&EvolutionCandidate> = population
             .choose_multiple(&mut rng, tournament_size)
             .collect();
 
         tournament.sort_by(|a, b| b.fitness_score.partial_cmp(&a.fitness_score).unwrap());
-        
+
         Ok(tournament[0].clone())
     }
 
@@ -572,20 +587,26 @@ impl StrategyEvolution {
         parent2: &EvolutionCandidate,
     ) -> Result<EvolutionCandidate> {
         let mut rng = thread_rng();
-        
+
         // Create child with blended parameters
-        let child_id = format!("{}x{}_{}", 
-            &parent1.strategy_id[..6], 
-            &parent2.strategy_id[..6], 
+        let child_id = format!(
+            "{}x{}_{}",
+            &parent1.strategy_id[..6],
+            &parent2.strategy_id[..6],
             rng.gen::<u32>()
         );
 
         // Blend numeric parameters
         let mut child_params = parent1.parameters.clone();
-        if let (Some(p1_obj), Some(p2_obj)) = (parent1.parameters.as_object(), parent2.parameters.as_object()) {
+        if let (Some(p1_obj), Some(p2_obj)) = (
+            parent1.parameters.as_object(),
+            parent2.parameters.as_object(),
+        ) {
             if let Some(child_obj) = child_params.as_object_mut() {
                 for (key, value) in p1_obj {
-                    if let (Some(v1), Some(v2)) = (value.as_f64(), p2_obj.get(key).and_then(|v| v.as_f64())) {
+                    if let (Some(v1), Some(v2)) =
+                        (value.as_f64(), p2_obj.get(key).and_then(|v| v.as_f64()))
+                    {
                         // Blend numeric values
                         let alpha = rng.gen::<f64>();
                         let blended = v1 * alpha + v2 * (1.0 - alpha);
@@ -597,7 +618,11 @@ impl StrategyEvolution {
 
         Ok(EvolutionCandidate {
             strategy_id: child_id,
-            strategy_type: if rng.gen::<bool>() { parent1.strategy_type.clone() } else { parent2.strategy_type.clone() },
+            strategy_type: if rng.gen::<bool>() {
+                parent1.strategy_type.clone()
+            } else {
+                parent2.strategy_type.clone()
+            },
             parameters: child_params,
             fitness_score: 0.0,
             age_generations: 0,
@@ -610,7 +635,7 @@ impl StrategyEvolution {
 
     fn mutate_strategy(&self, parent: &EvolutionCandidate) -> Result<EvolutionCandidate> {
         let mut rng = thread_rng();
-        
+
         let mutated_id = format!("{}m_{}", &parent.strategy_id[..8], rng.gen::<u32>());
         let mut mutated_params = parent.parameters.clone();
 
@@ -642,7 +667,8 @@ impl StrategyEvolution {
     }
 
     fn create_evolution_epoch(&self, market_conditions: &MarketConditions) -> EvolutionEpoch {
-        let fitness_scores: Vec<f64> = self.current_population
+        let fitness_scores: Vec<f64> = self
+            .current_population
             .iter()
             .map(|c| c.fitness_score)
             .collect();
@@ -650,10 +676,12 @@ impl StrategyEvolution {
         let average_fitness = fitness_scores.iter().sum::<f64>() / fitness_scores.len() as f64;
         let best_fitness = fitness_scores.iter().fold(0.0_f64, |a, &b| a.max(b));
         let worst_fitness = fitness_scores.iter().fold(f64::INFINITY, |a, &b| a.min(b));
-        
-        let variance = fitness_scores.iter()
+
+        let variance = fitness_scores
+            .iter()
             .map(|f| (f - average_fitness).powi(2))
-            .sum::<f64>() / fitness_scores.len() as f64;
+            .sum::<f64>()
+            / fitness_scores.len() as f64;
 
         EvolutionEpoch {
             timestamp: Utc::now(),
@@ -670,17 +698,26 @@ impl StrategyEvolution {
     }
 
     fn calculate_population_stats(&self) -> PopulationStats {
-        let total_age: u32 = self.current_population.iter().map(|c| c.age_generations).sum();
+        let total_age: u32 = self
+            .current_population
+            .iter()
+            .map(|c| c.age_generations)
+            .sum();
         let average_age = if !self.current_population.is_empty() {
             total_age as f64 / self.current_population.len() as f64
-        } else { 0.0 };
+        } else {
+            0.0
+        };
 
         let mut strategy_type_dist = HashMap::new();
         for candidate in &self.current_population {
-            *strategy_type_dist.entry(candidate.strategy_type.clone()).or_insert(0) += 1;
+            *strategy_type_dist
+                .entry(candidate.strategy_type.clone())
+                .or_insert(0) += 1;
         }
 
-        let fitness_scores: Vec<f64> = self.current_population
+        let fitness_scores: Vec<f64> = self
+            .current_population
             .iter()
             .map(|c| c.fitness_score)
             .collect();
@@ -732,30 +769,73 @@ impl StrategyEvolution {
             let recent = &self.evolution_history[self.evolution_history.len() - 1];
             let previous = &self.evolution_history[self.evolution_history.len() - 2];
             (previous.fitness_variance - recent.fitness_variance) / previous.fitness_variance
-        } else { 0.0 };
+        } else {
+            0.0
+        };
 
         // Diversity index (strategy type diversity)
         let mut type_counts = HashMap::new();
         for candidate in &self.current_population {
-            *type_counts.entry(candidate.strategy_type.clone()).or_insert(0) += 1;
+            *type_counts
+                .entry(candidate.strategy_type.clone())
+                .or_insert(0) += 1;
         }
-        
+
         let diversity_index = if !type_counts.is_empty() {
             let total = self.current_population.len() as f64;
-            -type_counts.values()
+            -type_counts
+                .values()
                 .map(|&count| {
                     let p = count as f64 / total;
                     p * p.ln()
                 })
                 .sum::<f64>()
-        } else { 0.0 };
+        } else {
+            0.0
+        };
+
+        let (adaptation_speed, stability_score, innovation_rate) = if let Some(recent) =
+            self.evolution_history.back()
+        {
+            let previous = self.evolution_history.iter().rev().nth(1);
+
+            let adaptation_speed = previous
+                .map(|prev| {
+                    let denom = prev.average_fitness.abs().max(1e-6);
+                    ((recent.average_fitness - prev.average_fitness) / denom).clamp(-1.0, 1.0)
+                })
+                .unwrap_or(0.0);
+
+            let stability_score = {
+                let fitness_spread = (recent.best_fitness - recent.worst_fitness).abs().max(1e-6);
+                let variance = recent.fitness_variance.max(0.0);
+                let std_dev = variance.sqrt();
+                (1.0 - (std_dev / fitness_spread).min(1.0)).clamp(0.0, 1.0)
+            };
+
+            let innovation_rate = if recent.population_size > 0 {
+                let created = recent.new_strategies_created as f64;
+                let churn = (recent.new_strategies_created + recent.strategies_eliminated) as f64;
+                if churn > 0.0 {
+                    (created / churn).clamp(0.0, 1.0)
+                } else {
+                    0.0
+                }
+            } else {
+                0.0
+            };
+
+            (adaptation_speed, stability_score, innovation_rate)
+        } else {
+            (0.0, 0.0, 0.0)
+        };
 
         EvolutionMetrics {
             convergence_rate: fitness_variance,
             diversity_index,
-            adaptation_speed: 0.5, // TODO: Calculate based on fitness improvement rate
-            stability_score: 0.7,  // TODO: Calculate based on performance consistency
-            innovation_rate: 0.3,  // TODO: Calculate based on new strategy creation rate
+            adaptation_speed,
+            stability_score,
+            innovation_rate,
         }
     }
 
@@ -765,11 +845,15 @@ impl StrategyEvolution {
         // Analyze population and suggest actions
         let avg_fitness = self.calculate_average_fitness();
         if avg_fitness < 0.3 {
-            recommendations.push("Population fitness is low - consider increasing mutation rate".to_string());
+            recommendations
+                .push("Population fitness is low - consider increasing mutation rate".to_string());
         }
 
         if self.current_population.len() < self.population_size / 2 {
-            recommendations.push("Population size is below optimal - consider adding new seed strategies".to_string());
+            recommendations.push(
+                "Population size is below optimal - consider adding new seed strategies"
+                    .to_string(),
+            );
         }
 
         let elite_ratio = self.elite_size as f64 / self.current_population.len() as f64;
@@ -781,18 +865,23 @@ impl StrategyEvolution {
     }
 
     fn get_current_generation(&self) -> u32 {
-        self.strategy_generations.values().max().copied().unwrap_or(0)
+        self.strategy_generations
+            .values()
+            .max()
+            .copied()
+            .unwrap_or(0)
     }
 
     fn calculate_average_fitness(&self) -> f64 {
         if self.current_population.is_empty() {
             return 0.0;
         }
-        
+
         self.current_population
             .iter()
             .map(|c| c.fitness_score)
-            .sum::<f64>() / self.current_population.len() as f64
+            .sum::<f64>()
+            / self.current_population.len() as f64
     }
 }
 

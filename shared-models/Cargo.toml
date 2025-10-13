@@ -11,5 +11,5 @@ anyhow = "1.0"
 async-trait = "0.1"
 thiserror = "1.0"
 redis = "0.24"
-sqlx = { version = "0.7", features = ["postgres", "runtime-tokio-rustls", "chrono", "uuid"] }
+sqlx = { version = "0.7", default-features = false, features = ["postgres", "runtime-tokio-rustls", "chrono", "uuid"] }
 prometheus = "0.13"

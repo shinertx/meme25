@@ -1,14 +1,14 @@
-use shared_models::error::{Result, ModelError};
+use chrono::{DateTime, Duration, Utc};
+use serde::{Deserialize, Serialize};
+use shared_models::error::{ModelError, Result};
 use std::collections::HashMap;
-use tracing::{info, warn, debug};
-use chrono::{DateTime, Utc, Duration};
-use serde::{Serialize, Deserialize};
+use tracing::{debug, info};
 
 /// Strategy Performance Attribution System
-/// 
+///
 /// **EDGE THESIS**: Precise performance attribution across strategies enables
 /// data-driven allocation decisions and rapid identification of alpha decay.
-/// 
+///
 /// **INSTITUTIONAL FEATURES**:
 /// - Real-time P&L attribution by strategy, trade, and market regime
 /// - Risk-adjusted performance metrics (Sharpe, Sortino, Calmar ratios)
@@ -97,15 +97,15 @@ pub struct DailySnapshot {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AttributionSummary {
     pub strategy_id: String,
-    pub attribution_pct: f64,          // % contribution to total portfolio PnL
-    pub risk_contribution_pct: f64,    // % contribution to portfolio risk
-    pub excess_return_pct: f64,        // Return above benchmark
-    pub information_ratio: f64,        // Excess return / tracking error
-    pub batting_average: f64,          // % of periods outperforming benchmark
-    pub alpha_attribution: f64,        // Pure alpha contribution
-    pub beta_attribution: f64,         // Market beta contribution
-    pub execution_cost_bps: f64,       // Execution cost drag
-    pub opportunity_cost_usd: f64,     // Missed opportunities
+    pub attribution_pct: f64,       // % contribution to total portfolio PnL
+    pub risk_contribution_pct: f64, // % contribution to portfolio risk
+    pub excess_return_pct: f64,     // Return above benchmark
+    pub information_ratio: f64,     // Excess return / tracking error
+    pub batting_average: f64,       // % of periods outperforming benchmark
+    pub alpha_attribution: f64,     // Pure alpha contribution
+    pub beta_attribution: f64,      // Market beta contribution
+    pub execution_cost_bps: f64,    // Execution cost drag
+    pub opportunity_cost_usd: f64,  // Missed opportunities
     pub risk_adjusted_contribution: f64, // Sharpe-weighted contribution
 }
 
@@ -152,73 +152,111 @@ impl PerformanceAttributor {
     /// Record a completed trade for performance attribution
     pub fn record_trade(&mut self, trade: TradeRecord) -> Result<()> {
         let strategy_id = trade.strategy_id.clone();
-        
+
         // Update strategy performance metrics
         self.update_strategy_performance(&strategy_id, &trade)?;
-        
+
         // Store trade record
         self.trade_records.push(trade);
-        
+
         // Clean old trade records (keep last 90 days)
         let cutoff = Utc::now() - Duration::days(90);
         self.trade_records.retain(|t| t.entry_time > cutoff);
-        
+
         debug!("Recorded trade for strategy: {}", strategy_id);
         Ok(())
     }
 
     /// Update comprehensive strategy performance metrics
-    fn update_strategy_performance(&mut self, strategy_id: &str, trade: &TradeRecord) -> Result<()> {
-        let perf = self.strategy_performance.entry(strategy_id.to_string())
-            .or_insert_with(|| StrategyPerformance::new(strategy_id.to_string()));
+    fn update_strategy_performance(
+        &mut self,
+        strategy_id: &str,
+        trade: &TradeRecord,
+    ) -> Result<()> {
+        let (needs_advanced_metrics, snapshot, benchmark_return) = {
+            let perf = self
+                .strategy_performance
+                .entry(strategy_id.to_string())
+                .or_insert_with(|| StrategyPerformance::new(strategy_id.to_string()));
 
-        // Update basic metrics
-        perf.total_pnl_usd += trade.realized_pnl_usd;
-        perf.daily_pnl_usd += trade.realized_pnl_usd;
-        perf.trades_count += 1;
-        perf.total_fees_usd += trade.fees_usd;
+            // Update basic metrics
+            perf.total_pnl_usd += trade.realized_pnl_usd;
+            perf.daily_pnl_usd += trade.realized_pnl_usd;
+            perf.trades_count += 1;
+            perf.total_fees_usd += trade.fees_usd;
 
-        // Update win/loss statistics
-        if trade.realized_pnl_usd > 0.0 {
-            perf.winning_trades += 1;
-            perf.avg_win_usd = (perf.avg_win_usd * (perf.winning_trades - 1) as f64 + trade.realized_pnl_usd) / perf.winning_trades as f64;
-            if trade.realized_pnl_usd > perf.max_win_usd {
-                perf.max_win_usd = trade.realized_pnl_usd;
+            // Update win/loss statistics
+            if trade.realized_pnl_usd > 0.0 {
+                perf.winning_trades += 1;
+                perf.avg_win_usd = (perf.avg_win_usd * (perf.winning_trades - 1) as f64
+                    + trade.realized_pnl_usd)
+                    / perf.winning_trades as f64;
+                if trade.realized_pnl_usd > perf.max_win_usd {
+                    perf.max_win_usd = trade.realized_pnl_usd;
+                }
+            } else if trade.realized_pnl_usd < 0.0 {
+                perf.losing_trades += 1;
+                perf.avg_loss_usd = (perf.avg_loss_usd * (perf.losing_trades - 1) as f64
+                    + trade.realized_pnl_usd)
+                    / perf.losing_trades as f64;
+                if trade.realized_pnl_usd < perf.max_loss_usd {
+                    perf.max_loss_usd = trade.realized_pnl_usd;
+                }
             }
-        } else if trade.realized_pnl_usd < 0.0 {
-            perf.losing_trades += 1;
-            perf.avg_loss_usd = (perf.avg_loss_usd * (perf.losing_trades - 1) as f64 + trade.realized_pnl_usd) / perf.losing_trades as f64;
-            if trade.realized_pnl_usd < perf.max_loss_usd {
-                perf.max_loss_usd = trade.realized_pnl_usd;
-            }
-        }
 
-        // Calculate derived metrics
-        perf.win_rate = if perf.trades_count > 0 {
-            perf.winning_trades as f64 / perf.trades_count as f64
-        } else {
-            0.0
+            // Calculate derived metrics
+            perf.win_rate = if perf.trades_count > 0 {
+                perf.winning_trades as f64 / perf.trades_count as f64
+            } else {
+                0.0
+            };
+
+            perf.profit_factor = if perf.avg_loss_usd != 0.0 {
+                (perf.avg_win_usd * perf.winning_trades as f64)
+                    / (perf.avg_loss_usd.abs() * perf.losing_trades as f64)
+            } else if perf.avg_win_usd > 0.0 {
+                f64::INFINITY
+            } else {
+                0.0
+            };
+
+            // Update slippage tracking
+            perf.avg_slippage_bps = if perf.trades_count > 1 {
+                (perf.avg_slippage_bps * (perf.trades_count - 1) as f64 + trade.slippage_bps)
+                    / perf.trades_count as f64
+            } else {
+                trade.slippage_bps
+            };
+
+            perf.last_update = Utc::now();
+
+            let snapshot = DailySnapshot {
+                date: Utc::now(),
+                strategy_id: strategy_id.to_string(),
+                portfolio_value_usd: 200.0 + perf.total_pnl_usd,
+                daily_pnl_usd: perf.daily_pnl_usd,
+                daily_return_pct: perf.total_return_pct,
+                trades_count: perf.trades_count,
+                win_rate: perf.win_rate,
+                avg_position_size_usd: trade.size_usd.abs(),
+                max_position_size_usd: trade.size_usd.abs().max(perf.max_win_usd.abs()),
+                total_exposure_usd: trade.size_usd.abs() * perf.trades_count as f64,
+                volatility: perf.avg_slippage_bps.abs(),
+            };
+
+            let benchmark_return_pct = if trade.size_usd.abs() > f64::EPSILON {
+                trade.realized_pnl_usd / trade.size_usd.abs()
+            } else {
+                0.0
+            };
+
+            (perf.trades_count >= 10, snapshot, benchmark_return_pct)
         };
 
-        perf.profit_factor = if perf.avg_loss_usd != 0.0 {
-            (perf.avg_win_usd * perf.winning_trades as f64) / (perf.avg_loss_usd.abs() * perf.losing_trades as f64)
-        } else {
-            if perf.avg_win_usd > 0.0 { f64::INFINITY } else { 0.0 }
-        };
+        self.store_daily_snapshot(snapshot);
+        self.record_benchmark_return(strategy_id, benchmark_return);
 
-        // Update slippage tracking
-        perf.avg_slippage_bps = if perf.trades_count > 1 {
-            (perf.avg_slippage_bps * (perf.trades_count - 1) as f64 + trade.slippage_bps) / perf.trades_count as f64
-        } else {
-            trade.slippage_bps
-        };
-
-        perf.last_update = Utc::now();
-
-        // Calculate advanced metrics if enough data
-        if perf.trades_count >= 10 {
-            // Drop the mutable reference before calling calculate_advanced_metrics
-            drop(perf);
+        if needs_advanced_metrics {
             self.calculate_advanced_metrics(strategy_id)?;
         }
 
@@ -227,7 +265,9 @@ impl PerformanceAttributor {
 
     /// Calculate advanced risk-adjusted performance metrics
     fn calculate_advanced_metrics(&mut self, strategy_id: &str) -> Result<()> {
-        let strategy_trades: Vec<&TradeRecord> = self.trade_records.iter()
+        let strategy_trades: Vec<&TradeRecord> = self
+            .trade_records
+            .iter()
             .filter(|t| t.strategy_id == strategy_id)
             .collect();
 
@@ -235,11 +275,14 @@ impl PerformanceAttributor {
             return Ok(()); // Need minimum data
         }
 
-        let perf = self.strategy_performance.get_mut(strategy_id)
+        let perf = self
+            .strategy_performance
+            .get_mut(strategy_id)
             .ok_or_else(|| ModelError::Strategy(format!("Strategy not found: {}", strategy_id)))?;
 
         // Calculate returns series
-        let returns: Vec<f64> = strategy_trades.iter()
+        let returns: Vec<f64> = strategy_trades
+            .iter()
             .map(|t| (t.realized_pnl_usd / t.size_usd) * 100.0) // Return percentage
             .collect();
 
@@ -249,65 +292,129 @@ impl PerformanceAttributor {
 
         // Calculate statistics
         let mean_return = returns.iter().sum::<f64>() / returns.len() as f64;
-        let variance = returns.iter()
+        let variance = returns
+            .iter()
             .map(|r| (r - mean_return).powi(2))
-            .sum::<f64>() / returns.len() as f64;
+            .sum::<f64>()
+            / returns.len() as f64;
         let std_dev = variance.sqrt();
 
         // Sharpe ratio (assuming 0% risk-free rate)
-        perf.sharpe_ratio = if std_dev > 0.0 { mean_return / std_dev } else { 0.0 };
+        perf.sharpe_ratio = if std_dev > 0.0 {
+            mean_return / std_dev
+        } else {
+            0.0
+        };
 
         // Sortino ratio (downside deviation)
-        let negative_returns: Vec<f64> = returns.iter()
-            .filter(|&&r| r < 0.0)
-            .cloned()
-            .collect();
+        let negative_returns: Vec<f64> = returns.iter().filter(|&&r| r < 0.0).cloned().collect();
 
         if !negative_returns.is_empty() {
-            let downside_variance = negative_returns.iter()
-                .map(|r| r.powi(2))
-                .sum::<f64>() / negative_returns.len() as f64;
+            let downside_variance = negative_returns.iter().map(|r| r.powi(2)).sum::<f64>()
+                / negative_returns.len() as f64;
             let downside_std = downside_variance.sqrt();
-            
-            perf.sortino_ratio = if downside_std > 0.0 { mean_return / downside_std } else { 0.0 };
+
+            perf.sortino_ratio = if downside_std > 0.0 {
+                mean_return / downside_std
+            } else {
+                0.0
+            };
         } else {
-            perf.sortino_ratio = if mean_return > 0.0 { f64::INFINITY } else { 0.0 };
+            perf.sortino_ratio = if mean_return > 0.0 {
+                f64::INFINITY
+            } else {
+                0.0
+            };
         }
 
         // Calculate drawdown metrics
         self.calculate_drawdown_metrics(strategy_id)?;
 
         // Calculate risk and alpha scores before getting mutable reference
-        let perf_clone = self.strategy_performance.get(strategy_id)
+        let perf_clone = self
+            .strategy_performance
+            .get(strategy_id)
             .ok_or_else(|| ModelError::Strategy(format!("Strategy not found: {}", strategy_id)))?
             .clone();
         let risk_score = self.calculate_risk_score(&perf_clone);
         let alpha_score = self.calculate_alpha_score(&perf_clone);
 
         // Get updated performance to continue calculations
-        let perf = self.strategy_performance.get_mut(strategy_id)
+        let perf = self
+            .strategy_performance
+            .get_mut(strategy_id)
             .ok_or_else(|| ModelError::Strategy(format!("Strategy not found: {}", strategy_id)))?;
 
         // Calmar ratio (annual return / max drawdown)
         perf.calmar_ratio = if perf.max_drawdown_pct > 0.0 {
             (mean_return * 365.0) / perf.max_drawdown_pct // Annualized
         } else {
-            if mean_return > 0.0 { f64::INFINITY } else { 0.0 }
+            if mean_return > 0.0 {
+                f64::INFINITY
+            } else {
+                0.0
+            }
         };
 
         // Apply pre-calculated scores
         perf.risk_score = risk_score;
         perf.alpha_score = alpha_score;
 
-        debug!("Updated advanced metrics for {}: Sharpe={:.3}, Sortino={:.3}, Calmar={:.3}", 
-               strategy_id, perf.sharpe_ratio, perf.sortino_ratio, perf.calmar_ratio);
+        debug!(
+            "Updated advanced metrics for {}: Sharpe={:.3}, Sortino={:.3}, Calmar={:.3}",
+            strategy_id, perf.sharpe_ratio, perf.sortino_ratio, perf.calmar_ratio
+        );
 
         Ok(())
     }
 
+    fn store_daily_snapshot(&mut self, snapshot: DailySnapshot) {
+        let entry = self
+            .daily_snapshots
+            .entry(snapshot.strategy_id.clone())
+            .or_insert_with(Vec::new);
+        entry.push(snapshot);
+        if entry.len() > 365 {
+            entry.remove(0);
+        }
+    }
+
+    fn record_benchmark_return(&mut self, strategy_id: &str, return_pct: f64) {
+        if self.benchmark_returns.len() >= 512 {
+            self.benchmark_returns.remove(0);
+        }
+        self.benchmark_returns.push(return_pct);
+
+        let average_return = if self.benchmark_returns.is_empty() {
+            0.0
+        } else {
+            self.benchmark_returns.iter().copied().sum::<f64>()
+                / self.benchmark_returns.len() as f64
+        };
+
+        self.attribution_cache
+            .entry(strategy_id.to_string())
+            .and_modify(|entry| entry.excess_return_pct = average_return)
+            .or_insert_with(|| AttributionSummary {
+                strategy_id: strategy_id.to_string(),
+                attribution_pct: 0.0,
+                risk_contribution_pct: 0.0,
+                excess_return_pct: average_return,
+                information_ratio: 0.0,
+                batting_average: 0.0,
+                alpha_attribution: 0.0,
+                beta_attribution: 0.0,
+                execution_cost_bps: 0.0,
+                opportunity_cost_usd: 0.0,
+                risk_adjusted_contribution: 0.0,
+            });
+    }
+
     /// Calculate drawdown metrics for a strategy
     fn calculate_drawdown_metrics(&mut self, strategy_id: &str) -> Result<()> {
-        let strategy_trades: Vec<&TradeRecord> = self.trade_records.iter()
+        let strategy_trades: Vec<&TradeRecord> = self
+            .trade_records
+            .iter()
             .filter(|t| t.strategy_id == strategy_id)
             .collect();
 
@@ -317,17 +424,17 @@ impl PerformanceAttributor {
 
         for trade in strategy_trades {
             current_value += trade.realized_pnl_usd;
-            
+
             if current_value > peak_value {
                 peak_value = current_value;
             }
-            
+
             let drawdown = if peak_value > 0.0 {
                 ((peak_value - current_value) / peak_value) * 100.0
             } else {
                 0.0
             };
-            
+
             if drawdown > max_drawdown {
                 max_drawdown = drawdown;
             }
@@ -352,10 +459,11 @@ impl PerformanceAttributor {
         let winrate_component = perf.win_rate;
         let consistency_component = if perf.trades_count > 20 { 1.0 } else { 0.5 }; // Reward consistency
 
-        (0.3 * sharpe_component + 
-         0.3 * drawdown_component + 
-         0.25 * winrate_component + 
-         0.15 * consistency_component).clamp(0.0, 1.0)
+        (0.3 * sharpe_component
+            + 0.3 * drawdown_component
+            + 0.25 * winrate_component
+            + 0.15 * consistency_component)
+            .clamp(0.0, 1.0)
     }
 
     /// Calculate alpha score (skill-based performance)
@@ -372,7 +480,9 @@ impl PerformanceAttributor {
     pub fn calculate_attribution(&mut self) -> Result<HashMap<String, AttributionSummary>> {
         info!("📊 Calculating performance attribution across all strategies");
 
-        let total_portfolio_pnl: f64 = self.strategy_performance.values()
+        let total_portfolio_pnl: f64 = self
+            .strategy_performance
+            .values()
             .map(|p| p.total_pnl_usd)
             .sum();
 
@@ -416,7 +526,8 @@ impl PerformanceAttributor {
                 batting_average: perf.win_rate,
                 alpha_attribution: perf.alpha_score * attribution_pct / 100.0,
                 beta_attribution: attribution_pct - (perf.alpha_score * attribution_pct / 100.0),
-                execution_cost_bps: perf.avg_slippage_bps + (perf.total_fees_usd / (perf.trades_count as f64 * 1000.0) * 10000.0), // Simplified
+                execution_cost_bps: perf.avg_slippage_bps
+                    + (perf.total_fees_usd / (perf.trades_count as f64 * 1000.0) * 10000.0), // Simplified
                 opportunity_cost_usd: 0.0, // Would calculate missed opportunities
                 risk_adjusted_contribution: attribution_pct * perf.sharpe_ratio / 2.0,
             };
@@ -427,7 +538,10 @@ impl PerformanceAttributor {
         self.attribution_cache = attributions.clone();
         self.last_calculation = Utc::now();
 
-        info!("Attribution calculated for {} strategies", attributions.len());
+        info!(
+            "Attribution calculated for {} strategies",
+            attributions.len()
+        );
         Ok(attributions)
     }
 
@@ -454,7 +568,11 @@ impl PerformanceAttributor {
                 alerts.push(PerformanceAlert {
                     strategy_id: strategy_id.clone(),
                     alert_type: AlertType::DrawdownExcess,
-                    severity: if perf.current_drawdown_pct > 25.0 { AlertSeverity::Critical } else { AlertSeverity::Warning },
+                    severity: if perf.current_drawdown_pct > 25.0 {
+                        AlertSeverity::Critical
+                    } else {
+                        AlertSeverity::Warning
+                    },
                     message: format!("High drawdown: {:.1}%", perf.current_drawdown_pct),
                     metric_value: perf.current_drawdown_pct,
                     threshold: 15.0,
@@ -497,10 +615,22 @@ impl PerformanceAttributor {
         let mut summary = HashMap::new();
 
         // Portfolio-level metrics
-        let total_pnl: f64 = self.strategy_performance.values().map(|p| p.total_pnl_usd).sum();
-        let total_trades: u32 = self.strategy_performance.values().map(|p| p.trades_count).sum();
+        let total_pnl: f64 = self
+            .strategy_performance
+            .values()
+            .map(|p| p.total_pnl_usd)
+            .sum();
+        let total_trades: u32 = self
+            .strategy_performance
+            .values()
+            .map(|p| p.trades_count)
+            .sum();
         let avg_sharpe: f64 = if !self.strategy_performance.is_empty() {
-            self.strategy_performance.values().map(|p| p.sharpe_ratio).sum::<f64>() / self.strategy_performance.len() as f64
+            self.strategy_performance
+                .values()
+                .map(|p| p.sharpe_ratio)
+                .sum::<f64>()
+                / self.strategy_performance.len() as f64
         } else {
             0.0
         };
@@ -508,24 +638,37 @@ impl PerformanceAttributor {
         summary.insert("total_pnl_usd".to_string(), serde_json::json!(total_pnl));
         summary.insert("total_trades".to_string(), serde_json::json!(total_trades));
         summary.insert("average_sharpe".to_string(), serde_json::json!(avg_sharpe));
-        summary.insert("active_strategies".to_string(), serde_json::json!(self.strategy_performance.len()));
+        summary.insert(
+            "active_strategies".to_string(),
+            serde_json::json!(self.strategy_performance.len()),
+        );
 
         // Top performers
         let mut sorted_strategies: Vec<_> = self.strategy_performance.iter().collect();
-        sorted_strategies.sort_by(|a, b| b.1.total_pnl_usd.partial_cmp(&a.1.total_pnl_usd).unwrap());
-        
-        let top_performers: Vec<_> = sorted_strategies.iter()
+        sorted_strategies
+            .sort_by(|a, b| b.1.total_pnl_usd.partial_cmp(&a.1.total_pnl_usd).unwrap());
+
+        let top_performers: Vec<_> = sorted_strategies
+            .iter()
             .take(3)
-            .map(|(id, perf)| serde_json::json!({
-                "strategy": id,
-                "pnl": perf.total_pnl_usd,
-                "sharpe": perf.sharpe_ratio,
-                "win_rate": perf.win_rate
-            }))
+            .map(|(id, perf)| {
+                serde_json::json!({
+                    "strategy": id,
+                    "pnl": perf.total_pnl_usd,
+                    "sharpe": perf.sharpe_ratio,
+                    "win_rate": perf.win_rate
+                })
+            })
             .collect();
 
-        summary.insert("top_performers".to_string(), serde_json::json!(top_performers));
-        summary.insert("last_calculation".to_string(), serde_json::json!(self.last_calculation));
+        summary.insert(
+            "top_performers".to_string(),
+            serde_json::json!(top_performers),
+        );
+        summary.insert(
+            "last_calculation".to_string(),
+            serde_json::json!(self.last_calculation),
+        );
 
         summary
     }

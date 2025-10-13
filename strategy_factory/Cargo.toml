@@ -3,6 +3,10 @@ name    = "strategy_factory"
 version = "0.1.0"
 edition = "2021"
 
+[[bin]]
+name = "strategy_factory"
+path = "src/main.rs"
+
 [dependencies]
 anyhow       = "1.0"
 rand         = "0.8"
@@ -12,4 +16,5 @@ serde_json   = "1.0"
 shared-models = { path = "../shared-models" }
 tokio        = { version = "1.0", features = ["rt-multi-thread", "macros"] }
 tracing      = "0.1"
+tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
 chrono       = { version = "0.4", features = ["serde"] }

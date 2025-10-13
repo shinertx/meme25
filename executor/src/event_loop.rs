@@ -1,9 +1,9 @@
-use shared_models::Event;
-use shared_models::error::{Result, ModelError};
 use crate::strategy_registry::StrategyRegistry;
 use redis::{Client, RedisResult};
+use shared_models::error::{ModelError, Result};
+use shared_models::Event;
 use tokio::time::{sleep, Duration};
-use tracing::{info, warn, error, debug};
+use tracing::{debug, error, info, warn};
 
 pub struct EventLoop {
     redis_client: Client,
@@ -17,7 +17,7 @@ impl EventLoop {
     pub fn new(redis_url: &str, strategy_registry: StrategyRegistry) -> Result<Self> {
         let redis_client = Client::open(redis_url)
             .map_err(|e| ModelError::Redis(format!("Failed to create Redis client: {}", e)))?;
-        
+
         Ok(EventLoop {
             redis_client,
             strategy_registry,
@@ -40,7 +40,10 @@ impl EventLoop {
     }
 
     pub async fn initialize(&self) -> Result<()> {
-        let mut conn = self.redis_client.get_multiplexed_async_connection().await
+        let mut conn = self
+            .redis_client
+            .get_multiplexed_async_connection()
+            .await
             .map_err(|e| ModelError::Redis(format!("Failed to get Redis connection: {}", e)))?;
 
         // Create consumer groups for all stream keys
@@ -53,36 +56,53 @@ impl EventLoop {
                 .arg("MKSTREAM")
                 .query_async(&mut conn)
                 .await;
-            
+
             match result {
                 Ok(_) => {
-                    info!("Created consumer group '{}' for stream '{}'", self.consumer_group, stream_key);
-                },
+                    info!(
+                        "Created consumer group '{}' for stream '{}'",
+                        self.consumer_group, stream_key
+                    );
+                }
                 Err(e) => {
                     let error_msg = e.to_string();
                     if error_msg.contains("BUSYGROUP") {
-                        info!("Consumer group '{}' already exists for stream '{}'", self.consumer_group, stream_key);
+                        info!(
+                            "Consumer group '{}' already exists for stream '{}'",
+                            self.consumer_group, stream_key
+                        );
                     } else {
-                        warn!("Failed to create consumer group '{}' for stream '{}': {}", 
-                              self.consumer_group, stream_key, e);
+                        warn!(
+                            "Failed to create consumer group '{}' for stream '{}': {}",
+                            self.consumer_group, stream_key, e
+                        );
                         // Continue with other streams instead of failing entirely
                     }
                 }
             }
         }
 
-        info!("Event loop initialized with {} stream keys", self.stream_keys.len());
+        info!(
+            "Event loop initialized with {} stream keys",
+            self.stream_keys.len()
+        );
         Ok(())
     }
 
     pub async fn run(&mut self) -> Result<()> {
         info!("Starting event loop");
-        let mut conn = self.redis_client.get_multiplexed_async_connection().await
+        let mut conn = self
+            .redis_client
+            .get_multiplexed_async_connection()
+            .await
             .map_err(|e| ModelError::Redis(format!("Failed to get Redis connection: {}", e)))?;
 
         let active_strategies = self.strategy_registry.get_active_strategies();
-        info!("Event loop running with {} active strategies: {:?}", 
-              active_strategies.len(), active_strategies);
+        info!(
+            "Event loop running with {} active strategies: {:?}",
+            active_strategies.len(),
+            active_strategies
+        );
 
         loop {
             match self.read_events(&mut conn).await {
@@ -123,7 +143,11 @@ impl EventLoop {
         Ok(events_processed)
     }
 
-    async fn read_stream_events(&mut self, conn: &mut redis::aio::MultiplexedConnection, stream_key: &str) -> Result<u32> {
+    async fn read_stream_events(
+        &mut self,
+        conn: &mut redis::aio::MultiplexedConnection,
+        stream_key: &str,
+    ) -> Result<u32> {
         let result: RedisResult<redis::streams::StreamReadReply> = redis::cmd("XREADGROUP")
             .arg("GROUP")
             .arg(&self.consumer_group)
@@ -144,9 +168,11 @@ impl EventLoop {
                 let error_msg = e.to_string();
                 if error_msg.contains("NOGROUP") {
                     // Consumer group doesn't exist, try to create it
-                    warn!("Consumer group '{}' not found for stream '{}', attempting to create it", 
-                          self.consumer_group, stream_key);
-                    
+                    warn!(
+                        "Consumer group '{}' not found for stream '{}', attempting to create it",
+                        self.consumer_group, stream_key
+                    );
+
                     let create_result: RedisResult<String> = redis::cmd("XGROUP")
                         .arg("CREATE")
                         .arg(stream_key)
@@ -155,28 +181,35 @@ impl EventLoop {
                         .arg("MKSTREAM")
                         .query_async(conn)
                         .await;
-                    
+
                     match create_result {
                         Ok(_) => {
-                            info!("Successfully created consumer group '{}' for stream '{}'", 
-                                  self.consumer_group, stream_key);
+                            info!(
+                                "Successfully created consumer group '{}' for stream '{}'",
+                                self.consumer_group, stream_key
+                            );
                             return Ok(0); // Return 0 events processed, will try again next cycle
-                        },
+                        }
                         Err(create_err) => {
                             if create_err.to_string().contains("BUSYGROUP") {
-                                info!("Consumer group '{}' already exists for stream '{}'", 
-                                      self.consumer_group, stream_key);
+                                info!(
+                                    "Consumer group '{}' already exists for stream '{}'",
+                                    self.consumer_group, stream_key
+                                );
                                 return Ok(0);
                             } else {
                                 return Err(ModelError::Redis(format!(
-                                    "Failed to create consumer group for stream {}: {}", 
+                                    "Failed to create consumer group for stream {}: {}",
                                     stream_key, create_err
                                 )));
                             }
                         }
                     }
                 } else {
-                    return Err(ModelError::Redis(format!("Failed to read from stream {}: {}", stream_key, e)));
+                    return Err(ModelError::Redis(format!(
+                        "Failed to read from stream {}: {}",
+                        stream_key, e
+                    )));
                 }
             }
         };
@@ -206,12 +239,17 @@ impl EventLoop {
         Ok(events_processed)
     }
 
-    async fn parse_and_process_event(&mut self, event_data: &std::collections::HashMap<String, redis::Value>) -> Result<()> {
+    async fn parse_and_process_event(
+        &mut self,
+        event_data: &std::collections::HashMap<String, redis::Value>,
+    ) -> Result<()> {
         // Extract event type and data
-        let event_type_value = event_data.get("type")
+        let event_type_value = event_data
+            .get("type")
             .ok_or_else(|| ModelError::Redis("Missing event type".into()))?;
-        
-        let event_data_value = event_data.get("data")
+
+        let event_data_value = event_data
+            .get("data")
             .ok_or_else(|| ModelError::Redis("Missing event data".into()))?;
 
         let event_type_str = match event_type_value {
@@ -227,8 +265,7 @@ impl EventLoop {
         };
 
         // Parse the event data JSON
-        let event: Event = serde_json::from_str(event_data_str)
-            .map_err(ModelError::Serde)?;
+        let event: Event = serde_json::from_str(event_data_str).map_err(ModelError::Serde)?;
 
         debug!("Processing event type: {}", event_type_str);
 

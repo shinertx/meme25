@@ -1,8 +1,8 @@
-use shared_models::{Event, StrategyType};
-use shared_models::error::{Result, ModelError};
-use std::collections::HashMap;
-use tracing::{info, error};
 use async_trait::async_trait;
+use shared_models::error::{ModelError, Result};
+use shared_models::{Event, StrategyType};
+use std::collections::HashMap;
+use tracing::{error, info};
 
 #[async_trait]
 pub trait StrategyTrait: Send + Sync {
@@ -30,7 +30,7 @@ impl StrategyRegistry {
 
     pub async fn process_event(&mut self, event: &Event) -> Result<()> {
         let mut processed_count = 0;
-        
+
         for (strategy_type, strategy) in &mut self.strategies {
             if strategy.is_active() {
                 match strategy.process_event(event).await {
@@ -38,7 +38,10 @@ impl StrategyRegistry {
                         processed_count += 1;
                     }
                     Err(e) => {
-                        error!("Strategy {:?} failed to process event: {}", strategy_type, e);
+                        error!(
+                            "Strategy {:?} failed to process event: {}",
+                            strategy_type, e
+                        );
                         // Continue processing other strategies even if one fails
                     }
                 }
@@ -46,7 +49,9 @@ impl StrategyRegistry {
         }
 
         if processed_count == 0 {
-            return Err(ModelError::Strategy("No active strategies processed the event".into()));
+            return Err(ModelError::Strategy(
+                "No active strategies processed the event".into(),
+            ));
         }
 
         Ok(())
@@ -154,13 +159,13 @@ impl StrategyTrait for ArbitrageStrategy {
 
 pub fn initialize_strategies() -> StrategyRegistry {
     let mut registry = StrategyRegistry::new();
-    
+
     // Use the default strategies from the strategies module
     let strategies = crate::strategies::default_strategies();
     for (_, strategy) in strategies {
         registry.register_strategy(strategy);
     }
-    
+
     info!("Initialized {} strategies", registry.strategy_count());
     registry
 }

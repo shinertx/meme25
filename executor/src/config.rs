@@ -1,6 +1,6 @@
 use serde::Deserialize;
-use std::env;
 use shared_models::error::{ModelError, Result};
+use std::env;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
@@ -11,9 +11,9 @@ pub struct Config {
     pub helius_api_key: String,
     pub jupiter_api_key: String,
     pub pump_fun_api_key: String,
-    pub birdeye_api_key: String,
+    pub birdeye_api_key: Option<String>,
     pub twitter_bearer_token: String,
-    pub farcaster_api_key: String,
+    pub farcaster_api_key: Option<String>,
     pub solana_private_key: String,
     pub initial_capital_usd: f64,
     pub max_portfolio_size_usd: f64,
@@ -42,9 +42,9 @@ impl Config {
             helius_api_key: env::var("HELIUS_API_KEY")?,
             jupiter_api_key: env::var("JUPITER_API_KEY")?,
             pump_fun_api_key: env::var("PUMP_FUN_API_KEY")?,
-            birdeye_api_key: env::var("BIRDEYE_API_KEY")?,
+            birdeye_api_key: env::var("BIRDEYE_API_KEY").ok(),
             twitter_bearer_token: env::var("TWITTER_BEARER_TOKEN")?,
-            farcaster_api_key: env::var("FARCASTER_API_KEY")?,
+            farcaster_api_key: env::var("FARCASTER_API_KEY").ok(),
             solana_private_key: env::var("SOLANA_PRIVATE_KEY")?,
             initial_capital_usd: env::var("INITIAL_CAPITAL")?.parse().unwrap_or(200.0),
             max_portfolio_size_usd: env::var("MAX_PORTFOLIO_SIZE")?.parse().unwrap_or(100000.0),
@@ -59,31 +59,45 @@ impl Config {
             jito_tip_lamports: env::var("JITO_TIP_LAMPORTS")?.parse().unwrap_or(100000),
             max_slippage_percent: env::var("MAX_SLIPPAGE")?.parse().unwrap_or(2.0),
             min_liquidity_usd: env::var("MIN_LIQUIDITY")?.parse().unwrap_or(10000.0),
-            target_annual_return_percent: env::var("TARGET_ANNUAL_RETURN")?.parse().unwrap_or(500.0),
+            target_annual_return_percent: env::var("TARGET_ANNUAL_RETURN")?
+                .parse()
+                .unwrap_or(500.0),
             metrics_port: env::var("METRICS_PORT").ok().and_then(|p| p.parse().ok()),
         })
     }
 
     pub fn validate(self) -> Result<Self> {
-        macro_rules! ensure { 
-            ($cond:expr, $msg:literal) => { 
-                if !$cond { 
-                    return Err(ModelError::Config($msg.into())); 
-                } 
-            }; 
+        macro_rules! ensure {
+            ($cond:expr, $msg:literal) => {
+                if !$cond {
+                    return Err(ModelError::Config($msg.into()));
+                }
+            };
         }
-        
+
         ensure!(!self.redis_url.is_empty(), "redis_url missing");
         ensure!(!self.database_url.is_empty(), "database_url missing");
-        ensure!(self.max_position_size_percent > 0.0, "max_position_size must be > 0");
-        ensure!(self.max_daily_drawdown_percent > 0.0 && self.max_daily_drawdown_percent < 100.0, "drawdown must be in (0,100) range");
-        ensure!(self.initial_capital_usd > 0.0, "initial_capital must be > 0");
-        ensure!(self.max_portfolio_size_usd > self.initial_capital_usd, "max_portfolio_size must be > initial_capital");
-        
+        ensure!(
+            self.max_position_size_percent > 0.0,
+            "max_position_size must be > 0"
+        );
+        ensure!(
+            self.max_daily_drawdown_percent > 0.0 && self.max_daily_drawdown_percent < 100.0,
+            "drawdown must be in (0,100) range"
+        );
+        ensure!(
+            self.initial_capital_usd > 0.0,
+            "initial_capital must be > 0"
+        );
+        ensure!(
+            self.max_portfolio_size_usd > self.initial_capital_usd,
+            "max_portfolio_size must be > initial_capital"
+        );
+
         if let Some(port) = self.metrics_port {
             ensure!(port > 1024, "metrics_port must be > 1024");
         }
-        
+
         Ok(self)
     }
 }

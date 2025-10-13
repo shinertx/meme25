@@ -5,20 +5,29 @@ use redis::{aio::MultiplexedConnection, AsyncCommands};
 use serde_json::json;
 use shared_models::StrategySpec;
 use std::time::Duration;
-use tokio::time::sleep;
+use tokio::time::{sleep, Duration as TokioDuration};
 use tracing::{info, Level};
 
 const REDIS_STREAM: &str = "allocations_channel"; // consumed by executor
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt()
-        .with_max_level(Level::INFO)
-        .init();
+    tracing_subscriber::fmt().with_max_level(Level::INFO).init();
     let redis_url =
         std::env::var("REDIS_URL").map_err(|e| anyhow::anyhow!("REDIS_URL not set: {}", e))?;
     let client = redis::Client::open(redis_url)?;
-    let mut conn: MultiplexedConnection = client.get_multiplexed_tokio_connection().await?;
+    let mut attempt: u32 = 0;
+    let mut conn: MultiplexedConnection = loop {
+        match client.get_multiplexed_tokio_connection().await {
+            Ok(c) => break c,
+            Err(e) => {
+                attempt += 1;
+                let backoff = TokioDuration::from_secs((attempt.min(10)) as u64);
+                tracing::warn!(attempt, %e, "Strategy-Factory: Redis connect failed; retrying in {:?}", backoff);
+                sleep(backoff).await;
+            }
+        }
+    };
 
     info!("🎲 Strategy‑Factory v25 online");
 
@@ -28,7 +37,10 @@ async fn main() -> Result<()> {
         let _: String = conn
             .xadd(REDIS_STREAM, "*", &[("allocations", &payload)])
             .await?;
-        info!(len = specs.len(), "Pushed fresh strategy allocations → Redis");
+        info!(
+            len = specs.len(),
+            "Pushed fresh strategy allocations → Redis"
+        );
         sleep(Duration::from_secs(900)).await; // 15 min evolution cadence
     }
 }

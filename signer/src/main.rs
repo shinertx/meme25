@@ -6,18 +6,18 @@ use axum::{
     routing::{get, post},
     Router,
 };
+use base64::{engine::general_purpose, Engine as _};
+use serde_json::json;
 use shared_models::{SignRequest, SignResponse};
 use solana_sdk::{
+    message::VersionedMessage,
     signature::{read_keypair_file, Keypair, Signer},
     transaction::VersionedTransaction,
-    message::VersionedMessage,
 };
 use std::{env, net::SocketAddr, sync::Arc};
+use tokio::sync::RwLock;
 use tracing::{error, info, instrument, level_filters::LevelFilter};
 use tracing_subscriber::EnvFilter;
-use base64::{Engine as _, engine::general_purpose};
-use serde_json::json;
-use tokio::sync::RwLock;
 use zeroize::Zeroizing;
 
 struct AppState {
@@ -40,16 +40,16 @@ async fn main() -> Result<()> {
     let keypair_filename = env::var("WALLET_KEYPAIR_FILENAME")
         .map_err(|_| anyhow!("WALLET_KEYPAIR_FILENAME environment variable must be set"))?;
     let keypair_path = format!("/app/wallet/{}", keypair_filename);
-    
+
     // Read keypair with secure memory handling
     let keypair_bytes = Zeroizing::new(
         std::fs::read(&keypair_path)
-            .map_err(|e| anyhow!("Failed to read keypair at {}: {}", keypair_path, e))?
+            .map_err(|e| anyhow!("Failed to read keypair at {}: {}", keypair_path, e))?,
     );
-    
+
     let keypair = Keypair::from_bytes(&keypair_bytes)
         .map_err(|e| anyhow!("Invalid keypair format: {}", e))?;
-    
+
     let pubkey = keypair.pubkey();
     info!(%pubkey, "Wallet loaded successfully");
 
@@ -67,7 +67,7 @@ async fn main() -> Result<()> {
 
     let addr = SocketAddr::from(([0, 0, 0, 0], 8989));
     info!("Signer service listening on http://{}", addr);
-    
+
     let listener = tokio::net::TcpListener::bind(addr).await?;
     axum::serve(listener, app).await?;
 
@@ -76,7 +76,7 @@ async fn main() -> Result<()> {
 
 #[instrument(skip(state), name = "get_pubkey_handler")]
 async fn get_pubkey(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {
-    Json(json!({ 
+    Json(json!({
         "pubkey": state.keypair.pubkey().to_string(),
         "service": "signer",
         "version": "25.0.0"
@@ -93,7 +93,7 @@ async fn sign_transaction(
         let mut count = state.request_count.write().await;
         *count += 1;
     }
-    
+
     // Decode transaction
     let tx_bytes = match general_purpose::STANDARD.decode(&request.transaction_b64) {
         Ok(bytes) => bytes,
@@ -111,27 +111,32 @@ async fn sign_transaction(
             return Err(StatusCode::BAD_REQUEST);
         }
     };
-    
+
     // Validate transaction
     if tx.signatures.is_empty() {
         error!("Transaction has no signature slots");
         return Err(StatusCode::BAD_REQUEST);
     }
-    
+
     // Get message bytes for signing
     let message_bytes = match &tx.message {
         VersionedMessage::Legacy(legacy) => legacy.serialize(),
         VersionedMessage::V0(v0) => {
             let writer = Vec::new();
             let mut cursor = std::io::Cursor::new(writer);
-            
+
             // Manually serialize v0 message
-            bincode::serialize_into(&mut cursor, &v0.header).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-            bincode::serialize_into(&mut cursor, &v0.account_keys).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-            bincode::serialize_into(&mut cursor, &v0.recent_blockhash).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-            bincode::serialize_into(&mut cursor, &v0.instructions).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-            bincode::serialize_into(&mut cursor, &v0.address_table_lookups).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-            
+            bincode::serialize_into(&mut cursor, &v0.header)
+                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            bincode::serialize_into(&mut cursor, &v0.account_keys)
+                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            bincode::serialize_into(&mut cursor, &v0.recent_blockhash)
+                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            bincode::serialize_into(&mut cursor, &v0.instructions)
+                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            bincode::serialize_into(&mut cursor, &v0.address_table_lookups)
+                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
             cursor.into_inner()
         }
     };
@@ -150,7 +155,7 @@ async fn sign_transaction(
     };
 
     info!("Transaction signed successfully");
-    
+
     Ok(Json(SignResponse {
         signed_transaction_b64: general_purpose::STANDARD.encode(&signed_tx_bytes),
     }))
@@ -162,7 +167,7 @@ async fn health_check() -> &'static str {
 
 async fn get_metrics(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {
     let count = *state.request_count.read().await;
-    
+
     Json(json!({
         "signatures_created": count,
         "status": "healthy",

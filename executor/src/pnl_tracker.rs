@@ -1,38 +1,38 @@
-use shared_models::error::{Result, ModelError};
-use tracing::{info, warn, debug};
-use chrono::{DateTime, Utc, Duration};
-use std::collections::{HashMap, VecDeque, BTreeMap};
-use serde::{Serialize, Deserialize};
-use shared_models::{Side, Trade};
-use prometheus::{Gauge, Counter, Histogram, HistogramOpts, Opts, Registry};
+use chrono::{DateTime, Duration, Utc};
+use prometheus::{Counter, Gauge, Histogram, HistogramOpts, Opts, Registry};
+use serde::{Deserialize, Serialize};
+use shared_models::error::Result;
+use shared_models::Side;
+use std::collections::{BTreeMap, HashMap, VecDeque};
+use tracing::{debug, info};
 
 /// Real-time P&L tracking with institutional-grade attribution and reporting
 #[derive(Debug)]
 pub struct PnLTracker {
     // Position tracking
     positions: HashMap<String, Position>,
-    
+
     // Performance tracking
     daily_pnl: f64,
     cumulative_pnl: f64,
     unrealized_pnl: f64,
     high_water_mark: f64,
     max_drawdown: f64,
-    
+
     // Strategy attribution
     strategy_pnl: HashMap<String, StrategyPnL>,
-    
+
     // Time series data
     pnl_history: VecDeque<PnLSnapshot>,
     intraday_pnl: BTreeMap<DateTime<Utc>, f64>,
-    
+
     // Risk metrics
     var_95: f64,
     sharpe_ratio: f64,
     win_rate: f64,
     _average_win: f64,
     _average_loss: f64,
-    
+
     // Prometheus metrics
     total_pnl_gauge: Gauge,
     daily_pnl_gauge: Gauge,
@@ -44,7 +44,7 @@ pub struct PnLTracker {
     total_trades_counter: Counter,
     winning_trades_counter: Counter,
     pnl_histogram: Histogram,
-    
+
     // Configuration
     portfolio_start_value: f64,
     risk_free_rate: f64,
@@ -156,53 +156,58 @@ impl PnLTracker {
         // Initialize Prometheus metrics
         let total_pnl_gauge = Gauge::with_opts(Opts::new(
             "portfolio_total_pnl_usd",
-            "Total portfolio P&L in USD"
+            "Total portfolio P&L in USD",
         ))?;
-        
+
         let daily_pnl_gauge = Gauge::with_opts(Opts::new(
-            "portfolio_daily_pnl_usd", 
-            "Daily portfolio P&L in USD"
+            "portfolio_daily_pnl_usd",
+            "Daily portfolio P&L in USD",
         ))?;
-        
+
         let unrealized_pnl_gauge = Gauge::with_opts(Opts::new(
             "portfolio_unrealized_pnl_usd",
-            "Unrealized portfolio P&L in USD"
+            "Unrealized portfolio P&L in USD",
         ))?;
-        
+
         let drawdown_gauge = Gauge::with_opts(Opts::new(
             "portfolio_drawdown_pct",
-            "Current portfolio drawdown percentage"
+            "Current portfolio drawdown percentage",
         ))?;
-        
+
         let sharpe_gauge = Gauge::with_opts(Opts::new(
             "portfolio_sharpe_ratio",
-            "Portfolio Sharpe ratio"
+            "Portfolio Sharpe ratio",
         ))?;
-        
+
         let win_rate_gauge = Gauge::with_opts(Opts::new(
             "portfolio_win_rate_pct",
-            "Portfolio win rate percentage"
+            "Portfolio win rate percentage",
         ))?;
-        
+
         let position_count_gauge = Gauge::with_opts(Opts::new(
             "portfolio_position_count",
-            "Number of active positions"
+            "Number of active positions",
         ))?;
-        
+
         let total_trades_counter = Counter::with_opts(Opts::new(
             "portfolio_total_trades",
-            "Total number of trades executed"
+            "Total number of trades executed",
         ))?;
-        
+
         let winning_trades_counter = Counter::with_opts(Opts::new(
             "portfolio_winning_trades",
-            "Total number of winning trades"
+            "Total number of winning trades",
         ))?;
-        
-        let pnl_histogram = Histogram::with_opts(HistogramOpts::new(
-            "portfolio_trade_pnl_usd",
-            "Distribution of trade P&L in USD"
-        ).buckets(vec![-100.0, -50.0, -20.0, -10.0, -5.0, 0.0, 5.0, 10.0, 20.0, 50.0, 100.0]))?;
+
+        let pnl_histogram = Histogram::with_opts(
+            HistogramOpts::new(
+                "portfolio_trade_pnl_usd",
+                "Distribution of trade P&L in USD",
+            )
+            .buckets(vec![
+                -100.0, -50.0, -20.0, -10.0, -5.0, 0.0, 5.0, 10.0, 20.0, 50.0, 100.0,
+            ]),
+        )?;
 
         // Register all metrics
         registry.register(Box::new(total_pnl_gauge.clone()))?;
@@ -258,7 +263,8 @@ impl PnLTracker {
         timestamp: DateTime<Utc>,
     ) -> Result<()> {
         // Update position
-        let position = self.positions
+        let position = self
+            .positions
             .entry(symbol.to_string())
             .or_insert(Position {
                 symbol: symbol.to_string(),
@@ -285,16 +291,17 @@ impl PnLTracker {
 
         // Calculate realized P&L for closing trades
         let mut realized_pnl = 0.0;
-        
-        if (position.quantity > 0.0 && signed_quantity < 0.0) || 
-           (position.quantity < 0.0 && signed_quantity > 0.0) {
+
+        if (position.quantity > 0.0 && signed_quantity < 0.0)
+            || (position.quantity < 0.0 && signed_quantity > 0.0)
+        {
             // Closing or reducing position
             let closing_quantity = signed_quantity.abs().min(position.quantity.abs());
             realized_pnl = match position.side {
                 Side::Long => (price - position.average_price) * closing_quantity,
                 Side::Short => (position.average_price - price) * closing_quantity,
             };
-            
+
             position.realized_pnl += realized_pnl;
             self.cumulative_pnl += realized_pnl;
             self.daily_pnl += realized_pnl;
@@ -308,8 +315,9 @@ impl PnLTracker {
             position.side = side;
             position.entry_timestamp = timestamp;
             position.strategy_id = strategy_id.to_string();
-        } else if (position.quantity > 0.0 && signed_quantity > 0.0) ||
-                  (position.quantity < 0.0 && signed_quantity < 0.0) {
+        } else if (position.quantity > 0.0 && signed_quantity > 0.0)
+            || (position.quantity < 0.0 && signed_quantity < 0.0)
+        {
             // Adding to position
             let total_cost = position.quantity * position.average_price + signed_quantity * price;
             position.quantity += signed_quantity;
@@ -329,29 +337,32 @@ impl PnLTracker {
         position.cost_basis = position.quantity.abs() * position.average_price;
         position.market_value = position.quantity * price;
         position.current_price = price;
-        position.duration_hours = timestamp.signed_duration_since(position.entry_timestamp)
-            .num_milliseconds() as f64 / 3_600_000.0;
+        position.duration_hours = timestamp
+            .signed_duration_since(position.entry_timestamp)
+            .num_milliseconds() as f64
+            / 3_600_000.0;
 
         // Update strategy P&L tracking
-        let strategy_pnl = self.strategy_pnl
-            .entry(strategy_id.to_string())
-            .or_insert(StrategyPnL {
-                strategy_id: strategy_id.to_string(),
-                realized_pnl: 0.0,
-                unrealized_pnl: 0.0,
-                total_pnl: 0.0,
-                trade_count: 0,
-                win_count: 0,
-                loss_count: 0,
-                average_trade_pnl: 0.0,
-                best_trade: 0.0,
-                worst_trade: 0.0,
-                sharpe_ratio: 0.0,
-                max_drawdown: 0.0,
-                current_drawdown: 0.0,
-                capital_allocated: 0.0,
-                return_on_capital: 0.0,
-            });
+        let strategy_pnl =
+            self.strategy_pnl
+                .entry(strategy_id.to_string())
+                .or_insert(StrategyPnL {
+                    strategy_id: strategy_id.to_string(),
+                    realized_pnl: 0.0,
+                    unrealized_pnl: 0.0,
+                    total_pnl: 0.0,
+                    trade_count: 0,
+                    win_count: 0,
+                    loss_count: 0,
+                    average_trade_pnl: 0.0,
+                    best_trade: 0.0,
+                    worst_trade: 0.0,
+                    sharpe_ratio: 0.0,
+                    max_drawdown: 0.0,
+                    current_drawdown: 0.0,
+                    capital_allocated: 0.0,
+                    return_on_capital: 0.0,
+                });
 
         strategy_pnl.trade_count += 1;
         strategy_pnl.realized_pnl += realized_pnl;
@@ -399,13 +410,13 @@ impl PnLTracker {
             if let Some(position) = self.positions.get_mut(&symbol) {
                 position.current_price = new_price;
                 position.market_value = position.quantity * new_price;
-                
+
                 // Calculate unrealized P&L
                 position.unrealized_pnl = match position.side {
                     Side::Long => (new_price - position.average_price) * position.quantity,
                     Side::Short => (position.average_price - new_price) * position.quantity.abs(),
                 };
-                
+
                 total_unrealized += position.unrealized_pnl;
 
                 // Update strategy unrealized P&L
@@ -416,16 +427,17 @@ impl PnLTracker {
         }
 
         self.unrealized_pnl = total_unrealized;
-        
+
         // Update portfolio metrics
         self.update_portfolio_metrics();
-        
+
         Ok(())
     }
 
     /// Take a snapshot of current P&L state
     pub fn take_snapshot(&mut self, timestamp: DateTime<Utc>) -> Result<()> {
-        let portfolio_value = self.portfolio_start_value + self.cumulative_pnl + self.unrealized_pnl;
+        let portfolio_value =
+            self.portfolio_start_value + self.cumulative_pnl + self.unrealized_pnl;
         let current_drawdown = self.calculate_current_drawdown();
 
         let snapshot = PnLSnapshot {
@@ -435,13 +447,14 @@ impl PnLTracker {
             unrealized_pnl: self.unrealized_pnl,
             portfolio_value,
             position_count: self.positions.len() as u32,
-            cash_balance: self.portfolio_start_value + self.cumulative_pnl - self.calculate_invested_capital(),
+            cash_balance: self.portfolio_start_value + self.cumulative_pnl
+                - self.calculate_invested_capital(),
             drawdown: current_drawdown,
             var_95: self.var_95,
         };
 
         self.pnl_history.push_back(snapshot);
-        
+
         // Keep only recent history (last 30 days)
         let cutoff = timestamp - Duration::days(30);
         while let Some(front) = self.pnl_history.front() {
@@ -470,13 +483,14 @@ impl PnLTracker {
     pub fn reset_daily_pnl(&mut self) {
         self.daily_pnl = 0.0;
         self.intraday_pnl.clear();
-        
+
         // Reset strategy daily tracking
         for strategy_pnl in self.strategy_pnl.values_mut() {
             // Update running averages and metrics but reset daily tracking
             strategy_pnl.total_pnl = strategy_pnl.realized_pnl + strategy_pnl.unrealized_pnl;
             if strategy_pnl.trade_count > 0 {
-                strategy_pnl.average_trade_pnl = strategy_pnl.realized_pnl / strategy_pnl.trade_count as f64;
+                strategy_pnl.average_trade_pnl =
+                    strategy_pnl.realized_pnl / strategy_pnl.trade_count as f64;
             }
         }
 
@@ -487,7 +501,8 @@ impl PnLTracker {
     pub fn generate_report(&self) -> PnLReport {
         let total_pnl = self.cumulative_pnl + self.unrealized_pnl;
         let portfolio_value = self.portfolio_start_value + total_pnl;
-        let cash_balance = self.portfolio_start_value + self.cumulative_pnl - self.calculate_invested_capital();
+        let cash_balance =
+            self.portfolio_start_value + self.cumulative_pnl - self.calculate_invested_capital();
 
         let summary = PnLSummary {
             total_pnl,
@@ -541,10 +556,7 @@ impl PnLTracker {
     }
 
     fn calculate_invested_capital(&self) -> f64 {
-        self.positions
-            .values()
-            .map(|p| p.cost_basis.abs())
-            .sum()
+        self.positions.values().map(|p| p.cost_basis.abs()).sum()
     }
 
     fn calculate_current_drawdown(&self) -> f64 {
@@ -553,20 +565,7 @@ impl PnLTracker {
     }
 
     fn calculate_sharpe_ratio(&mut self) {
-        if self.pnl_history.len() < 2 {
-            self.sharpe_ratio = 0.0;
-            return;
-        }
-
-        let history_vec: Vec<&PnLSnapshot> = self.pnl_history.iter().collect();
-        let returns: Vec<f64> = history_vec
-            .windows(2)
-            .map(|window| {
-                let prev_value = window[0].portfolio_value;
-                let curr_value = window[1].portfolio_value;
-                (curr_value - prev_value) / prev_value
-            })
-            .collect();
+        let returns = self.compute_return_series();
 
         if returns.is_empty() {
             self.sharpe_ratio = 0.0;
@@ -574,9 +573,11 @@ impl PnLTracker {
         }
 
         let mean_return = returns.iter().sum::<f64>() / returns.len() as f64;
-        let variance = returns.iter()
+        let variance = returns
+            .iter()
             .map(|r| (r - mean_return).powi(2))
-            .sum::<f64>() / returns.len() as f64;
+            .sum::<f64>()
+            / returns.len() as f64;
         let std_dev = variance.sqrt();
 
         if std_dev > 0.0 {
@@ -589,21 +590,165 @@ impl PnLTracker {
     }
 
     fn calculate_win_rate(&mut self) {
-        let total_trades = self.strategy_pnl
+        let total_trades = self
+            .strategy_pnl
             .values()
             .map(|s| s.trade_count)
             .sum::<u32>();
 
-        let winning_trades = self.strategy_pnl
-            .values()
-            .map(|s| s.win_count)
-            .sum::<u32>();
+        let winning_trades = self.strategy_pnl.values().map(|s| s.win_count).sum::<u32>();
 
         if total_trades > 0 {
             self.win_rate = (winning_trades as f64 / total_trades as f64) * 100.0;
         } else {
             self.win_rate = 0.0;
         }
+    }
+
+    fn compute_return_series(&self) -> Vec<f64> {
+        if self.pnl_history.len() < 2 {
+            return Vec::new();
+        }
+
+        let history_vec: Vec<&PnLSnapshot> = self.pnl_history.iter().collect();
+        history_vec
+            .windows(2)
+            .filter_map(|window| {
+                let prev_value = window[0].portfolio_value;
+                let curr_value = window[1].portfolio_value;
+                if prev_value.abs() > f64::EPSILON {
+                    Some((curr_value - prev_value) / prev_value)
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
+    fn compute_benchmark_returns(&self) -> Vec<f64> {
+        if self.intraday_pnl.len() < 2 {
+            return Vec::new();
+        }
+
+        let mut points: Vec<_> = self.intraday_pnl.iter().collect();
+        points.sort_by_key(|(ts, _)| *ts);
+
+        let base = self.portfolio_start_value.abs().max(1.0);
+
+        points
+            .windows(2)
+            .map(|window| {
+                let prev = *window[0].1;
+                let curr = *window[1].1;
+                (curr - prev) / base
+            })
+            .collect()
+    }
+
+    fn calculate_sortino_ratio_from_returns(&self, returns: &[f64]) -> f64 {
+        if returns.is_empty() {
+            return 0.0;
+        }
+
+        let downside: Vec<f64> = returns.iter().copied().filter(|r| *r < 0.0).collect();
+
+        if downside.is_empty() {
+            return 0.0;
+        }
+
+        let mean_return = returns.iter().sum::<f64>() / returns.len() as f64;
+        let downside_variance =
+            downside.iter().map(|r| r.powi(2)).sum::<f64>() / downside.len() as f64;
+
+        if downside_variance <= 0.0 {
+            return 0.0;
+        }
+
+        let downside_deviation = downside_variance.sqrt();
+        let excess_return = mean_return - (self.risk_free_rate / 365.0);
+        (excess_return / downside_deviation) * (365.0_f64).sqrt()
+    }
+
+    fn calculate_annualized_volatility(&self, returns: &[f64]) -> f64 {
+        if returns.len() < 2 {
+            return 0.0;
+        }
+
+        let mean = returns.iter().sum::<f64>() / returns.len() as f64;
+        let variance = returns.iter().map(|r| (r - mean).powi(2)).sum::<f64>()
+            / (returns.len().saturating_sub(1)) as f64;
+
+        if variance <= 0.0 {
+            0.0
+        } else {
+            variance.sqrt() * (365.0_f64).sqrt()
+        }
+    }
+
+    fn calculate_beta_from_returns(&self, returns: &[f64]) -> f64 {
+        let benchmark = self.compute_benchmark_returns();
+        let len = returns.len().min(benchmark.len());
+
+        if len < 2 {
+            return 0.0;
+        }
+
+        let returns_slice = &returns[returns.len() - len..];
+        let benchmark_slice = &benchmark[benchmark.len() - len..];
+
+        let mean_returns = returns_slice.iter().sum::<f64>() / len as f64;
+        let mean_benchmark = benchmark_slice.iter().sum::<f64>() / len as f64;
+
+        let covariance = returns_slice
+            .iter()
+            .zip(benchmark_slice.iter())
+            .map(|(r, b)| (r - mean_returns) * (b - mean_benchmark))
+            .sum::<f64>()
+            / len as f64;
+
+        let variance = benchmark_slice
+            .iter()
+            .map(|b| (b - mean_benchmark).powi(2))
+            .sum::<f64>()
+            / len as f64;
+
+        if variance.abs() < 1e-9 {
+            0.0
+        } else {
+            covariance / variance
+        }
+    }
+
+    fn average_open_trade_duration(&self) -> f64 {
+        if self.positions.is_empty() {
+            return 0.0;
+        }
+
+        self.positions
+            .values()
+            .map(|p| p.duration_hours)
+            .sum::<f64>()
+            / self.positions.len() as f64
+    }
+
+    fn trades_per_day_over_history(&self, total_trades: u32) -> f64 {
+        if total_trades == 0 {
+            return 0.0;
+        }
+
+        let start = match self.pnl_history.front() {
+            Some(snapshot) => snapshot.timestamp,
+            None => return total_trades as f64,
+        };
+
+        let end = match self.pnl_history.back() {
+            Some(snapshot) => snapshot.timestamp,
+            None => return total_trades as f64,
+        };
+
+        let seconds = (end - start).num_seconds().max(0) as f64;
+        let days = (seconds / 86_400.0).max(1.0 / 24.0);
+        total_trades as f64 / days
     }
 
     fn calculate_var_95(&mut self) {
@@ -638,31 +783,46 @@ impl PnLTracker {
     }
 
     fn calculate_risk_metrics(&self) -> RiskMetrics {
+        let returns = self.compute_return_series();
         RiskMetrics {
             value_at_risk_95: self.var_95,
             max_drawdown: self.max_drawdown,
             current_drawdown: self.calculate_current_drawdown(),
             sharpe_ratio: self.sharpe_ratio,
-            sortino_ratio: 0.0, // TODO: Implement
-            calmar_ratio: if self.max_drawdown > 0.0 { 
-                (self.cumulative_pnl + self.unrealized_pnl) / self.max_drawdown 
-            } else { 0.0 },
-            volatility: 0.0, // TODO: Implement
-            beta: 0.0, // TODO: Implement
+            sortino_ratio: self.calculate_sortino_ratio_from_returns(&returns),
+            calmar_ratio: if self.max_drawdown > 0.0 {
+                (self.cumulative_pnl + self.unrealized_pnl) / self.max_drawdown
+            } else {
+                0.0
+            },
+            volatility: self.calculate_annualized_volatility(&returns),
+            beta: self.calculate_beta_from_returns(&returns),
         }
     }
 
     fn calculate_performance_metrics(&self) -> PerformanceMetrics {
-        let total_trades = self.strategy_pnl.values().map(|s| s.trade_count).sum::<u32>();
+        let total_trades = self
+            .strategy_pnl
+            .values()
+            .map(|s| s.trade_count)
+            .sum::<u32>();
         let winning_trades = self.strategy_pnl.values().map(|s| s.win_count).sum::<u32>();
-        let losing_trades = self.strategy_pnl.values().map(|s| s.loss_count).sum::<u32>();
+        let losing_trades = self
+            .strategy_pnl
+            .values()
+            .map(|s| s.loss_count)
+            .sum::<u32>();
 
-        let total_wins: f64 = self.strategy_pnl.values()
+        let total_wins: f64 = self
+            .strategy_pnl
+            .values()
             .filter(|s| s.best_trade > 0.0)
             .map(|s| s.best_trade)
             .sum();
 
-        let total_losses: f64 = self.strategy_pnl.values()
+        let total_losses: f64 = self
+            .strategy_pnl
+            .values()
             .filter(|s| s.worst_trade < 0.0)
             .map(|s| s.worst_trade.abs())
             .sum();
@@ -672,13 +832,33 @@ impl PnLTracker {
             winning_trades,
             losing_trades,
             win_rate: self.win_rate,
-            average_win: if winning_trades > 0 { total_wins / winning_trades as f64 } else { 0.0 },
-            average_loss: if losing_trades > 0 { total_losses / losing_trades as f64 } else { 0.0 },
-            profit_factor: if total_losses > 0.0 { total_wins / total_losses } else { 0.0 },
-            largest_win: self.strategy_pnl.values().map(|s| s.best_trade).fold(0.0, f64::max),
-            largest_loss: self.strategy_pnl.values().map(|s| s.worst_trade).fold(0.0, f64::min),
-            average_trade_duration_hours: 0.0, // TODO: Implement
-            trades_per_day: 0.0, // TODO: Implement
+            average_win: if winning_trades > 0 {
+                total_wins / winning_trades as f64
+            } else {
+                0.0
+            },
+            average_loss: if losing_trades > 0 {
+                total_losses / losing_trades as f64
+            } else {
+                0.0
+            },
+            profit_factor: if total_losses > 0.0 {
+                total_wins / total_losses
+            } else {
+                0.0
+            },
+            largest_win: self
+                .strategy_pnl
+                .values()
+                .map(|s| s.best_trade)
+                .fold(0.0, f64::max),
+            largest_loss: self
+                .strategy_pnl
+                .values()
+                .map(|s| s.worst_trade)
+                .fold(0.0, f64::min),
+            average_trade_duration_hours: self.average_open_trade_duration(),
+            trades_per_day: self.trades_per_day_over_history(total_trades),
         }
     }
 }
