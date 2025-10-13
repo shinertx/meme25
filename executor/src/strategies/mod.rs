@@ -2,6 +2,7 @@
 pub mod airdrop_rotation;
 pub mod bridge_inflow;
 pub mod dev_wallet_drain;
+pub mod eth_breakout_momentum;
 pub mod korean_time_burst;
 pub mod liquidity_migration;
 pub mod mean_revert_1h;
@@ -16,6 +17,7 @@ use airdrop_rotation::AirdropRotation;
 use async_trait::async_trait;
 use bridge_inflow::BridgeInflow;
 use dev_wallet_drain::DevWalletDrain;
+use eth_breakout_momentum::EthBreakoutMomentum;
 use korean_time_burst::KoreanTimeBurst;
 use liquidity_migration::LiquidityMigration;
 use mean_revert_1h::MeanRevert1h;
@@ -168,6 +170,29 @@ pub fn default_strategies() -> HashMap<String, Box<dyn StrategyTrait>> {
             StrategyType::MeanReversion,
             MeanRevert1h::default(),
             mean_rev_params,
+        ),
+    );
+
+    let eth_breakout_params = json!({
+        "lookback_hours": 24,
+        "stop_loss_pct": 0.012,
+        "take_profit_pct": 0.017,
+        "breakout_buffer": 0.0025,
+        "volume_multiplier": 2.0,
+        "slope_min": 0.0003,
+        "cooldown_minutes": 180,
+        "min_liquidity_usd": 5_000_000.0,
+        "session_start_hour": 13,
+        "session_end_hour": 23,
+        "max_hold_minutes": 300,
+        "suggested_size_usd": 4.0
+    });
+    strategies.insert(
+        "eth_breakout_momentum".into(),
+        StrategyAdapter::boxed_with_params(
+            StrategyType::Momentum,
+            EthBreakoutMomentum::default(),
+            eth_breakout_params,
         ),
     );
 

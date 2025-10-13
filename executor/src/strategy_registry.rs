@@ -12,7 +12,7 @@ pub trait StrategyTrait: Send + Sync {
 }
 
 pub struct StrategyRegistry {
-    strategies: HashMap<StrategyType, Box<dyn StrategyTrait>>,
+    strategies: HashMap<String, Box<dyn StrategyTrait>>,
 }
 
 impl StrategyRegistry {
@@ -22,16 +22,15 @@ impl StrategyRegistry {
         }
     }
 
-    pub fn register_strategy(&mut self, strategy: Box<dyn StrategyTrait>) {
-        let strategy_type = strategy.get_type();
-        info!("Registering strategy: {:?}", strategy_type);
-        self.strategies.insert(strategy_type, strategy);
+    pub fn register_strategy(&mut self, id: String, strategy: Box<dyn StrategyTrait>) {
+        info!("Registering strategy: {} ({:?})", id, strategy.get_type());
+        self.strategies.insert(id, strategy);
     }
 
     pub async fn process_event(&mut self, event: &Event) -> Result<()> {
         let mut processed_count = 0;
 
-        for (strategy_type, strategy) in &mut self.strategies {
+        for strategy in self.strategies.values_mut() {
             if strategy.is_active() {
                 match strategy.process_event(event).await {
                     Ok(()) => {
@@ -40,7 +39,8 @@ impl StrategyRegistry {
                     Err(e) => {
                         error!(
                             "Strategy {:?} failed to process event: {}",
-                            strategy_type, e
+                            strategy.get_type(),
+                            e
                         );
                         // Continue processing other strategies even if one fails
                     }
@@ -58,11 +58,16 @@ impl StrategyRegistry {
     }
 
     pub fn get_active_strategies(&self) -> Vec<StrategyType> {
-        self.strategies
-            .iter()
-            .filter(|(_, strategy)| strategy.is_active())
-            .map(|(strategy_type, _)| *strategy_type)
-            .collect()
+        let mut active: Vec<StrategyType> = Vec::new();
+        for strategy in self.strategies.values() {
+            if strategy.is_active() {
+                let strategy_type = strategy.get_type();
+                if !active.contains(&strategy_type) {
+                    active.push(strategy_type);
+                }
+            }
+        }
+        active
     }
 
     pub fn strategy_count(&self) -> usize {
@@ -162,8 +167,8 @@ pub fn initialize_strategies() -> StrategyRegistry {
 
     // Use the default strategies from the strategies module
     let strategies = crate::strategies::default_strategies();
-    for (_, strategy) in strategies {
-        registry.register_strategy(strategy);
+    for (id, strategy) in strategies {
+        registry.register_strategy(id, strategy);
     }
 
     info!("Initialized {} strategies", registry.strategy_count());

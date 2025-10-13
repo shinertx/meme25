@@ -1,5 +1,4 @@
 pub mod advanced_circuit_breakers;
-pub mod autonomous_coder;
 pub mod circuit_breaker;
 pub mod config;
 pub mod correlation_manager;

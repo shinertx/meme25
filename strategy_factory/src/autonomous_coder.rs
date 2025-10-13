@@ -1,10 +1,12 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
+use std::process::Stdio;
+use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StrategyTemplate {
@@ -51,28 +53,40 @@ impl AutonomousCoder {
     pub async fn generate_strategy(&self, template: StrategyTemplate) -> Result<CodeGenResult> {
         let file_name = format!("{}_{}.rs", template.name, template.timeframe);
         let file_path = format!("{}/{}", self.strategy_dir, file_name);
-        
-        let strategy_code = self.generate_strategy_code(&template)?;
-        let test_code = self.generate_test_code(&template)?;
-        
+
+        info!(
+            "🤖 Using GPT-5 Codex to generate strategy: {}",
+            template.name
+        );
+
+        // Create AI prompt for strategy generation
+        let prompt = self.create_strategy_prompt(&template)?;
+
+        // Use Codex CLI to generate strategy
+        let strategy_code = self.generate_with_codex(&prompt, "strategy").await?;
+
+        // Generate test code with AI
+        let test_prompt = self.create_test_prompt(&template)?;
+        let test_code = self.generate_with_codex(&test_prompt, "test").await?;
+
         // Write strategy file
-        fs::write(&file_path, &strategy_code)?;
-        info!("Generated strategy file: {}", file_path);
-        
+        fs::write(&file_path, &strategy_code).context("Failed to write strategy file")?;
+        info!("✅ AI-generated strategy file: {}", file_path);
+
         // Write test file
         let test_file_path = format!("{}/test_{}.rs", self.test_dir, template.name);
-        fs::write(&test_file_path, &test_code)?;
-        
+        fs::write(&test_file_path, &test_code).context("Failed to write test file")?;
+
         // Run tests
         let test_results = self.run_tests(&template.name).await?;
-        
+
         // Run backtest if tests pass
         let backtest_metrics = if test_results.contains("test result: ok") {
             Some(self.run_backtest(&template).await?)
         } else {
             None
         };
-        
+
         Ok(CodeGenResult {
             file_path,
             content: strategy_code,
@@ -81,15 +95,142 @@ impl AutonomousCoder {
         })
     }
 
-    /// Generate Rust strategy code from template
+    /// Create AI prompt for strategy generation
+    fn create_strategy_prompt(&self, template: &StrategyTemplate) -> Result<String> {
+        let prompt = format!(
+            r#"
+Generate a high-performance Rust trading strategy implementing the Strategy trait.
+
+Requirements:
+- Strategy Name: {}
+- Timeframe: {}
+- Indicators: {:?}
+- Entry Conditions: {:?}
+- Exit Conditions: {:?}
+- Risk Parameters: {:?}
+
+The strategy must:
+1. Implement the Strategy trait with on_market_event and get_position_size methods
+2. Include comprehensive error handling with anyhow::Result
+3. Use institutional-grade risk management (max 2% position size, stop losses)
+4. Include detailed logging with tracing macros
+5. Be production-ready with no placeholders or TODO comments
+6. Target Sharpe ratio ≥ 1.5 and max drawdown ≤ 5%
+7. Include all necessary imports and dependencies
+8. Follow Rust best practices with proper error propagation
+
+Generate complete, compilable Rust code for executor/src/strategies/ directory.
+"#,
+            template.name,
+            template.timeframe,
+            template.indicators,
+            template.entry_conditions,
+            template.exit_conditions,
+            template.risk_params
+        );
+
+        Ok(prompt)
+    }
+
+    /// Create AI prompt for test generation
+    fn create_test_prompt(&self, template: &StrategyTemplate) -> Result<String> {
+        let prompt = format!(
+            r#"
+Generate comprehensive unit tests for the {} trading strategy.
+
+Requirements:
+1. Test all strategy logic including entry/exit conditions
+2. Test risk management boundaries (position sizing, stop losses)
+3. Test edge cases and error conditions
+4. Use realistic market data scenarios
+5. Validate Sharpe ratio and drawdown calculations
+6. Include integration tests with mock market events
+7. Follow Rust testing best practices with #[cfg(test)]
+8. All tests must be deterministic and reproducible
+
+Strategy details:
+- Name: {}
+- Timeframe: {}
+- Indicators: {:?}
+- Entry/Exit conditions: {:?}/{:?}
+
+Generate complete, compilable Rust test code.
+"#,
+            template.name,
+            template.name,
+            template.timeframe,
+            template.indicators,
+            template.entry_conditions,
+            template.exit_conditions
+        );
+
+        Ok(prompt)
+    }
+
+    /// Generate code using Codex CLI
+    async fn generate_with_codex(&self, prompt: &str, code_type: &str) -> Result<String> {
+        info!("🤖 Invoking GPT-5 Codex for {} generation...", code_type);
+
+        // Create temporary prompt file
+        let temp_file = format!("/tmp/codex_prompt_{}.txt", code_type);
+        fs::write(&temp_file, prompt).context("Failed to write prompt file")?;
+
+        // Execute Codex CLI command
+        let mut cmd = Command::new("codex")
+            .args(&[
+                "exec", 
+                &format!("Read {}. Generate production-ready Rust code following the specifications exactly. Output only the Rust code, no explanations.", temp_file)
+            ])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .context("Failed to spawn codex command")?;
+
+        // Read output
+        let stdout = cmd.stdout.take().unwrap();
+        let mut reader = BufReader::new(stdout);
+        let mut output = String::new();
+        let mut line = String::new();
+
+        while reader.read_line(&mut line).await? > 0 {
+            output.push_str(&line);
+            line.clear();
+        }
+
+        // Wait for command completion
+        let status = cmd.wait().await?;
+
+        // Clean up temp file
+        let _ = fs::remove_file(&temp_file);
+
+        if !status.success() {
+            return Err(anyhow::anyhow!(
+                "Codex command failed with status: {}",
+                status
+            ));
+        }
+
+        if output.trim().is_empty() {
+            return Err(anyhow::anyhow!("Codex generated empty output"));
+        }
+
+        info!(
+            "✅ AI generated {} lines of {} code",
+            output.lines().count(),
+            code_type
+        );
+        Ok(output)
+    }
+
+    /// Generate Rust strategy code from template (Legacy - kept for fallback)
     fn generate_strategy_code(&self, template: &StrategyTemplate) -> Result<String> {
         let strategy_name = format!("{}Strategy", to_pascal_case(&template.name));
-        
-        let code = format!(r#"
+
+        let code = format!(
+            r#"
 use anyhow::Result;
 use serde::{{Deserialize, Serialize}};
 use std::collections::HashMap;
-use crate::{{StrategyAction, StrategyContext}};
 use shared_models::{{MarketEvent, PriceTick}};
 use tracing::{{debug, info}};
 
@@ -206,57 +347,64 @@ impl {strategy_name} {{
 "#,
             strategy_name = strategy_name,
             param_fields = self.generate_param_fields(&template.indicators),
-            position_size = template.risk_params.get("position_size_pct").unwrap_or(&2.0),
+            position_size = template
+                .risk_params
+                .get("position_size_pct")
+                .unwrap_or(&2.0),
             stop_loss = template.risk_params.get("stop_loss_pct").unwrap_or(&5.0),
             take_profit = template.risk_params.get("take_profit_pct").unwrap_or(&10.0),
             param_defaults = self.generate_param_defaults(&template.indicators),
             entry_logic = self.generate_entry_logic(&template.entry_conditions),
             exit_logic = self.generate_exit_logic(&template.exit_conditions),
         );
-        
+
         Ok(code)
     }
-    
+
     fn generate_param_fields(&self, indicators: &[String]) -> String {
-        indicators.iter()
+        indicators
+            .iter()
             .map(|indicator| format!("    pub {}_period: i32,", indicator.to_lowercase()))
             .collect::<Vec<_>>()
             .join("\n")
     }
-    
+
     fn generate_param_defaults(&self, indicators: &[String]) -> String {
-        indicators.iter()
+        indicators
+            .iter()
             .map(|indicator| format!("            {}_period: 20,", indicator.to_lowercase()))
             .collect::<Vec<_>>()
             .join("\n")
     }
-    
+
     fn generate_entry_logic(&self, conditions: &[String]) -> String {
         if conditions.is_empty() {
             return "Ok(tick.volume_usd_5m > 1000.0)".to_string();
         }
-        
-        let logic = conditions.iter()
+
+        let logic = conditions
+            .iter()
             .map(|condition| self.translate_condition(condition))
             .collect::<Vec<_>>()
             .join(" && ");
-            
+
         format!("Ok({})", logic)
     }
-    
+
     fn generate_exit_logic(&self, conditions: &[String]) -> String {
         if conditions.is_empty() {
             return "Ok(false)".to_string();
         }
-        
-        let logic = conditions.iter()
+
+        let logic = conditions
+            .iter()
             .map(|condition| self.translate_condition(condition))
             .collect::<Vec<_>>()
             .join(" || ");
-            
+
         format!("Ok({})", logic)
     }
-    
+
     fn translate_condition(&self, condition: &str) -> String {
         match condition {
             "volume_spike" => "tick.volume_usd_5m > tick.volume_usd_1m * 2.0".to_string(),
@@ -266,11 +414,12 @@ impl {strategy_name} {{
             _ => "true".to_string(),
         }
     }
-    
+
     fn generate_test_code(&self, template: &StrategyTemplate) -> Result<String> {
         let strategy_name = format!("{}Strategy", to_pascal_case(&template.name));
-        
-        let test_code = format!(r#"
+
+        let test_code = format!(
+            r#"
 #[cfg(test)]
 mod tests {{
     use super::*;
@@ -308,24 +457,21 @@ mod tests {{
     }}
 }}
 "#,
-            template.name,
-            strategy_name,
-            template.name,
-            strategy_name,
+            template.name, strategy_name, template.name, strategy_name,
         );
-        
+
         Ok(test_code)
     }
-    
+
     async fn run_tests(&self, strategy_name: &str) -> Result<String> {
         let output = Command::new("cargo")
             .args(&["test", &format!("test_{}", strategy_name)])
             .output()
             .await?;
-            
+
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
     }
-    
+
     async fn run_backtest(&self, template: &StrategyTemplate) -> Result<BacktestMetrics> {
         // This would call the backtest engine
         // For now, return mock metrics
@@ -336,48 +482,46 @@ mod tests {{
             total_return: 25.3,
         })
     }
-    
+
     /// Auto-commit profitable strategies to GitHub
     pub async fn auto_commit(&self, result: &CodeGenResult) -> Result<()> {
         if !self.paper_trading_mode {
             info!("Not in paper trading mode, skipping auto-commit");
             return Ok(());
         }
-        
+
         // Check if strategy meets promotion criteria
         if let Some(metrics) = &result.backtest_metrics {
             if metrics.sharpe_ratio >= 1.5 && metrics.max_drawdown > -10.0 {
                 info!("Strategy meets criteria, auto-committing to GitHub");
-                
+
                 // Add files
                 Command::new("git")
                     .args(&["add", &result.file_path])
                     .output()
                     .await?;
-                
+
                 // Commit with metrics
                 let commit_msg = format!(
                     "feat: auto-generated strategy with Sharpe {:.2}, DD {:.1}%, WR {:.1}%",
-                    metrics.sharpe_ratio,
-                    metrics.max_drawdown,
-                    metrics.win_rate
+                    metrics.sharpe_ratio, metrics.max_drawdown, metrics.win_rate
                 );
-                
+
                 Command::new("git")
                     .args(&["commit", "-m", &commit_msg])
                     .output()
                     .await?;
-                
+
                 // Push to GitHub
                 Command::new("git")
                     .args(&["push", "origin", "main"])
                     .output()
                     .await?;
-                
+
                 info!("Successfully auto-committed profitable strategy");
             }
         }
-        
+
         Ok(())
     }
 }
@@ -388,7 +532,9 @@ fn to_pascal_case(s: &str) -> String {
             let mut chars = word.chars();
             match chars.next() {
                 None => String::new(),
-                Some(first) => first.to_uppercase().collect::<String>() + &chars.as_str().to_lowercase(),
+                Some(first) => {
+                    first.to_uppercase().collect::<String>() + &chars.as_str().to_lowercase()
+                }
             }
         })
         .collect()
