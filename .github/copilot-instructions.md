@@ -29,7 +29,7 @@ Scale $200 to $1M within exactly 30 days, via autonomous trading, explicitly val
 
 Operate solely on regulated U.S. crypto exchanges (Coinbase, Kraken, regulated U.S.-only venues). No offshore or unregulated venues allowed.
 
-Full autonomy in live trading: Absolutely zero human intervention once deployed live—no manual overrides permitted.
+Full autonomy in paper trading: Absolutely zero human intervention for strategy evolution, backtesting, and paper deployment—complete CLI-to-GitHub-to-deployment automation.
 
 Institutional rigor: Zero tolerance for untested live changes; every single module and update requires explicit numeric audit (tolerance ≤1%).
 
@@ -57,21 +57,22 @@ You build exactly once, test rigorously, validate explicitly, and deploy autonom
 
 ## 🎯 Key Operating Principles
 
-1. **STRICT "NO NEW FILES"**  
-   - Never introduce a new source file without explicit Founder approval.  
-   - If you need one, declare its path & purpose in a team meeting note before scaffolding.
+1. **AUTONOMOUS STRATEGY EVOLUTION**  
+   - **Paper Trading Mode**: Full autonomy to create new strategy files, modify parameters, and deploy without approval.
+   - **Live Trading Mode**: Founder approval required for new files and capital deployment above $50.
+   - Auto-generate strategy files when genetic algorithms discover profitable patterns (Sharpe ≥ 1.5).
 
-2. **MULTI-ROLE "RED TEAM AUDIT" BEFORE ANY CHANGE**  
-   - _Statistical Edge:_ Re-validate Sharpe, win-rate, position sizing for \$200 base (and \$10 k scenarios).  
-   - _Latency & Slippage Realism:_ Simulate true order-book dynamics & network overhead.  
-   - _Production Code Quality:_ Error handling, concurrency safety, resource limits.  
-   - _Infra Resilience:_ Health-checks, failovers, circuit-breakers, monitoring coverage.  
-   - _Data Integrity & ML Fidelity:_ Ensure training/backtest data fidelity to July 2025.
+2. **ADAPTIVE VALIDATION FRAMEWORK**  
+   - **Paper Trading**: Fast iteration cycles (2-4 hours shadow trading) with automated promotion.
+   - **Live Trading**: Full red-team audit with 2-week shadow trading minimum.
+   - _Statistical Edge:_ Auto-validate Sharpe, win-rate, position sizing; promote if thresholds met.  
+   - _Production Quality:_ Automated testing pipeline with rollback on failures.
+   - _Data Integrity:_ Continuous validation with drift detection and auto-retraining.
 
-3. **AUTOMATED TESTING & VALIDATION**  
-   - Every PR runs: unit tests, integration tests, full-suite backtest regression against real historical data.  
-   - Strategies must shadow-paper trade with live data for ≥ 2 weeks before any capital deployment.  
-   - Canary releases: incremental capital tranches, strict live monitoring dashboards.
+3. **AUTONOMOUS TESTING & DEPLOYMENT**  
+   - **Auto-Testing**: Every change triggers unit tests, integration tests, backtest regression.
+   - **Paper Mode**: 2-4 hour shadow trading → auto-promote if profitable → auto-commit to GitHub.
+   - **Live Mode**: 2-week shadow trading → human approval → canary releases with monitoring.
 
 4. **MONITORING & FAIL-SAFE**  
    - Prometheus + Grafana alerts on any statistical edge or latency degradation.  
@@ -85,6 +86,21 @@ You build exactly once, test rigorously, validate explicitly, and deploy autonom
    - Generate only patch-style diffs respecting above rules.  
    - Enforce pre-commit lint, compile, test, and produce audit reports before merges.  
    - Update `.env.example`, README, and docs in every relevant commit.
+
+7. **ROLE-AWARE INTERACTIVE PROMPTS**  
+   - Before major codegen, produce structured "team meeting" analysis:  
+     1. Summary of proposal  
+     2. Quant/risk/audit considerations  
+     3. Prioritized sprint backlog
+
+8. **EDGE & ARITHMETIC CHECKS**  
+   - Numerically verify all sizing, Sharpe, PnL & risk formulas.  
+   - Align backtest assumptions strictly with July 2025 market realities.
+
+9. **COMPLIANCE & BUDGET CONSTRAINTS**  
+   - US-only venue compliance (KYC/AML).  
+   - Starting capital \$200, max \$200/mo ops cost.  
+   - Growth must respect strict risk management—no blind moonshots.
 
 7. **ROLE-AWARE INTERACTIVE PROMPTS**  
    - Before major codegen, produce structured "team meeting" analysis:  
