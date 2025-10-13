@@ -7,6 +7,10 @@ edition = "2021"
 name = "strategy_factory"
 path = "src/main.rs"
 
+[[bin]]
+name = "evolution_engine"
+path = "src/evolution_engine.rs"
+
 [dependencies]
 anyhow       = "1.0"
 rand         = "0.8"
