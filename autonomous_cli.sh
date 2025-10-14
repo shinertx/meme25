@@ -91,9 +91,9 @@ case "${1:-help}" in
         fi
         
         # Start AI-powered evolution with Codex CLI
-        cd /home/benjaminjones/meme25
+        cd /Users/benjijmac/meme25
         echo "🤖 Launching AI Agent with 30-minute autonomous cycle..."
-        $CODEX_CMD exec -p default -C /home/benjaminjones/meme25 ${MODEL_ARGS[@]} \
+        $CODEX_CMD exec -p default -C /Users/benjijmac/meme25 ${MODEL_ARGS[@]} \
             --sandbox danger-full-access --dangerously-bypass-approvals-and-sandbox \
             "Read agents.md. Treat as contract. Loop: PLAN→RESEARCH→CODE→TEST→VALIDATE→DEPLOY. Generate profitable trading strategies. Stop on DoD pass or 30m timeout."
         ;;
@@ -203,9 +203,9 @@ case "${1:-help}" in
             exit 1
         fi
         
-        cd /home/benjaminjones/meme25
+        cd /Users/benjijmac/meme25
         echo "🤖 AI Agent analyzing strategy performance..."
-        $CODEX_CMD exec -p default -C /home/benjaminjones/meme25 ${MODEL_ARGS[@]} \
+        $CODEX_CMD exec -p default -C /Users/benjijmac/meme25 ${MODEL_ARGS[@]} \
             --sandbox danger-full-access --dangerously-bypass-approvals-and-sandbox \
             "Run comprehensive backtesting analysis. Execute: python backtest_engine/run_backtest.py. Analyze results. Auto-promote strategies with Sharpe ≥1.5 and drawdown ≤5%. Generate detailed performance report."
         ;;
@@ -217,17 +217,17 @@ case "${1:-help}" in
         echo "   - Beginning autonomous operation"
         echo ""
         
-        cd /home/benjaminjones/meme25
-    $COMPOSE_CMD -f docker-compose.efficient.yml up -d
+        cd /Users/benjijmac/meme25
+        $COMPOSE_CMD -f docker-compose.efficient.yml up -d
         echo "✅ System deployed and running autonomously"
         ;;
         
     "status")
         echo "📊 System Status:"
-        cd /home/benjaminjones/meme25
+        cd /Users/benjijmac/meme25
         
         # Check if services are running
-    if $COMPOSE_CMD -f docker-compose.efficient.yml ps | grep -q "Up"; then
+        if $COMPOSE_CMD -f docker-compose.efficient.yml ps | grep -q "Up"; then
             echo "✅ Trading system is running"
             
             # Check recent strategy generations
@@ -253,17 +253,17 @@ case "${1:-help}" in
         echo "   - Monitoring risk controls"
         echo ""
         
-        cd /home/benjaminjones/meme25
+        cd /Users/benjijmac/meme25
         
         # Stream logs from key services
-    $COMPOSE_CMD -f docker-compose.efficient.yml logs -f executor strategy_factory | \
+        $COMPOSE_CMD -f docker-compose.efficient.yml logs -f executor strategy_factory | \
         grep -E "(auto-generated|evolution|strategy|profit|loss)" --color=always
         ;;
         
     "stop")
         echo "🛑 Stopping Autonomous Trading System..."
-        cd /home/benjaminjones/meme25
-    $COMPOSE_CMD -f docker-compose.efficient.yml down
+        cd /Users/benjijmac/meme25
+        $COMPOSE_CMD -f docker-compose.efficient.yml down
         echo "✅ System stopped"
         ;;
         
