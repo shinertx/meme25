@@ -202,7 +202,7 @@ impl Strategy for EthBreakoutMomentum {
         self.signals_emitted = 0;
 
         info!(
-            strategy = self.id(),
+            strategy = strategy_id,
             lookback_hours = self.lookback_hours,
             stop_loss_pct = format!("{:.4}", self.stop_loss_pct),
             take_profit_pct = format!("{:.4}", self.take_profit_pct),
@@ -248,6 +248,7 @@ impl Strategy for EthBreakoutMomentum {
         ) {
             return Ok(StrategyAction::Hold);
         }
+        let strategy_id = self.id();
 
         let history = self
             .histories
@@ -261,7 +262,7 @@ impl Strategy for EthBreakoutMomentum {
                 Ordering::Less => {
                     // Skip late data, but warn once per token
                     warn!(
-                        strategy = self.id(),
+                        strategy = strategy_id,
                         token = %tick.token_address,
                         event_time = ?tick.timestamp,
                         bucket_time = ?bucket_start,
@@ -406,7 +407,7 @@ impl Strategy for EthBreakoutMomentum {
             };
 
             info!(
-                strategy = self.id(),
+                strategy = strategy_id,
                 token = %tick.token_address,
                 price = last_bar.close,
                 prev_high,
@@ -483,7 +484,7 @@ fn update_history(
                     token,
                     event_bucket = ?bucket_start,
                     last_bucket = ?last.bucket_start,
-                    \"Out-of-order price tick encountered\"
+                    "Out-of-order price tick encountered"
                 );
             }
             Ordering::Equal => {
@@ -568,8 +569,7 @@ fn compute_metrics(
     let slope = (last_bar.close - slope_baseline) / slope_baseline;
     let volume_ratio = last_bar.volume / avg_volume;
 
-    let breakout_condition =
-        last_bar.close > prev_high * (1.0 + breakout_buffer + f64::EPSILON);
+    let breakout_condition = last_bar.close > prev_high * (1.0 + breakout_buffer + f64::EPSILON);
     let volume_condition = last_bar.volume > avg_volume * volume_multiplier;
     let slope_condition = slope >= slope_min;
 

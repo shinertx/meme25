@@ -1,7 +1,43 @@
 use anyhow::{Context, Result};
-use reqwest::Client;
+use reqwest::{
+    header::{HeaderName, HeaderValue, AUTHORIZATION},
+    Client, RequestBuilder,
+};
 use serde_json::Value as JsonValue;
 use tracing::{debug, warn};
+
+fn with_jupiter_headers(builder: RequestBuilder) -> RequestBuilder {
+    match std::env::var("JUPITER_API_KEY") {
+        Ok(key) if !key.trim().is_empty() => {
+            let trimmed = key.trim();
+            let header_name = std::env::var("JUPITER_API_KEY_HEADER")
+                .ok()
+                .and_then(|name| HeaderName::from_bytes(name.as_bytes()).ok())
+                .unwrap_or_else(|| HeaderName::from_static("x-api-key"));
+            let prefix = std::env::var("JUPITER_API_KEY_PREFIX").unwrap_or_default();
+            let include_bearer = std::env::var("JUPITER_INCLUDE_BEARER")
+                .map(|v| v != "false")
+                .unwrap_or(true);
+            let header_value_str = format!("{}{}", prefix, trimmed);
+
+            let mut builder = match HeaderValue::from_str(&header_value_str) {
+                Ok(value) => builder.header(header_name, value),
+                Err(_) => builder,
+            };
+
+            if include_bearer {
+                if let Ok(auth_value) =
+                    HeaderValue::from_str(&format!("Bearer {}", trimmed))
+                {
+                    builder = builder.header(AUTHORIZATION, auth_value);
+                }
+            }
+
+            builder
+        }
+        _ => builder,
+    }
+}
 
 pub struct LiquidityAnalyzer {
     min_liquidity_usd: f64,
@@ -228,7 +264,7 @@ impl LiquidityAnalyzer {
 
     async fn fetch_jupiter_pool(&self, token: &str) -> Result<Option<PoolData>> {
         let api_url = std::env::var("JUPITER_BASE_URL")
-            .unwrap_or_else(|_| "https://quote-api.jup.ag/v6".to_string());
+            .unwrap_or_else(|_| "https://api.jup.ag/swap/v1".to_string());
 
         let usdc_mint = std::env::var("USDC_MINT")
             .unwrap_or_else(|_| "EPjFWdd5AufqSSqeM2qZ8d8bP8XPhYet6GtDq3z31g".to_string());
@@ -240,7 +276,7 @@ impl LiquidityAnalyzer {
 
         let amount_usdc = 100_000_000u64; // 100 USDC with 6 decimals
 
-        let response = client
+        let request = client
             .get(format!("{}/quote", api_url))
             .query(&[
                 ("inputMint", usdc_mint.as_str()),
@@ -249,7 +285,9 @@ impl LiquidityAnalyzer {
                 ("slippageBps", "100"),
                 ("onlyDirectRoutes", "false"),
                 ("asLegacyTransaction", "false"),
-            ])
+            ]);
+
+        let response = with_jupiter_headers(request)
             .send()
             .await
             .context("Jupiter quote request failed")?;

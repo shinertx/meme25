@@ -1,7 +1,47 @@
 use anyhow::Result;
-use reqwest::Client;
+use reqwest::{
+    header::{HeaderName, HeaderValue, AUTHORIZATION},
+    Client, RequestBuilder,
+};
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info, warn};
+
+const DEFAULT_JUPITER_BASE_URL: &str = "https://api.jup.ag/swap/v1";
+
+pub fn with_jupiter_headers(builder: RequestBuilder) -> RequestBuilder {
+    match std::env::var("JUPITER_API_KEY") {
+        Ok(key) if !key.trim().is_empty() => {
+            let trimmed = key.trim();
+            let header_name = std::env::var("JUPITER_API_KEY_HEADER")
+                .ok()
+                .and_then(|name| HeaderName::from_bytes(name.as_bytes()).ok())
+                .unwrap_or_else(|| HeaderName::from_static("x-api-key"));
+            let prefix = std::env::var("JUPITER_API_KEY_PREFIX").unwrap_or_default();
+            let include_bearer = std::env::var("JUPITER_INCLUDE_BEARER")
+                .map(|v| v != "false")
+                .unwrap_or(true);
+            let header_value_str = format!("{}{}", prefix, trimmed);
+
+            let mut builder = match HeaderValue::from_str(&header_value_str) {
+                Ok(value) => builder.header(header_name, value),
+                Err(_) => builder,
+            };
+
+            if include_bearer {
+                if let Ok(auth_value) = HeaderValue::from_str(&format!("Bearer {}", trimmed)) {
+                    builder = builder.header(AUTHORIZATION, auth_value);
+                }
+            }
+
+            builder
+        }
+        _ => builder,
+    }
+}
+
+pub fn jupiter_base_url() -> String {
+    std::env::var("JUPITER_BASE_URL").unwrap_or_else(|_| DEFAULT_JUPITER_BASE_URL.to_string())
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct QuoteRequest {
@@ -79,7 +119,10 @@ pub struct JupiterClient {
 impl JupiterClient {
     pub fn new(base_url: String) -> Self {
         Self {
-            client: Client::new(),
+            client: Client::builder()
+                .user_agent("meme25-jupiter-client/1.0")
+                .build()
+                .unwrap_or_else(|_| Client::new()),
             base_url,
         }
     }
@@ -96,7 +139,9 @@ impl JupiterClient {
 
         let url = format!("{}/quote", self.base_url);
 
-        let response = self.client.get(&url).query(&request).send().await?;
+        let response = with_jupiter_headers(self.client.get(&url).query(&request))
+            .send()
+            .await?;
 
         if response.status().is_success() {
             let quote: QuoteResponse = response.json().await?;
@@ -121,7 +166,9 @@ impl JupiterClient {
 
         let url = format!("{}/swap", self.base_url);
 
-        let response = self.client.post(&url).json(&request).send().await?;
+        let response = with_jupiter_headers(self.client.post(&url).json(&request))
+            .send()
+            .await?;
 
         if response.status().is_success() {
             let swap: SwapResponse = response.json().await?;

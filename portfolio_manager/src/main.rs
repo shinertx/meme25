@@ -4,7 +4,7 @@ use serde::Deserialize;
 use shared_models::{StrategyAllocation, TradeMode};
 use std::collections::HashMap;
 use tokio::time::{sleep, Duration};
-use tracing::{error, info, warn, Level};
+use tracing::{debug, error, info, warn, Level};
 
 const RESULT_STREAM: &str = "backtest_results";
 const OUT_STREAM: &str = "allocations_channel";
@@ -103,28 +103,63 @@ async fn main() -> Result<()> {
     let mut last_id = "0-0".to_string();
 
     loop {
-        match conn
+        let response = match conn
             .xread_options(
                 &[RESULT_STREAM],
                 &[&last_id],
                 &StreamReadOptions::default().block(1000).count(64),
             )
             .await
-            .context("Failed reading backtest results stream")?
         {
+            Ok(value) => value,
+            Err(err) => {
+                if err.kind() == redis::ErrorKind::ResponseError
+                    && err.to_string().contains("Invalid stream ID")
+                {
+                    warn!(error = %err, last_id, "Redis stream not initialized; resetting cursor");
+                    last_id = "0-0".to_string();
+                } else {
+                    warn!(error = %err, last_id, "Redis stream read failed; retrying");
+                }
+                sleep(Duration::from_millis(500)).await;
+                continue;
+            }
+        };
+
+        match response {
             Value::Bulk(streams) => {
                 for stream in streams {
-                    if let Value::Bulk(entries) = stream {
-                        if entries.len() < 2 {
+                    let Value::Bulk(stream_parts) = stream else {
+                        continue;
+                    };
+                    if stream_parts.len() < 2 {
+                        continue;
+                    }
+
+                    let Some(Value::Bulk(entries)) = stream_parts.get(1) else {
+                        continue;
+                    };
+
+                    for entry in entries {
+                        let Value::Bulk(entry_parts) = entry else {
+                            continue;
+                        };
+                        if entry_parts.len() < 2 {
                             continue;
                         }
-                        let Some(entry_id) = value_to_string(&entries[0]) else {
+                        let Some(entry_id) = value_to_string(&entry_parts[0]) else {
                             error!("Skipping entry without id");
                             continue;
                         };
+                        debug!(entry_id = %entry_id, "Processing backtest entry");
                         last_id = entry_id;
-                        if let Value::Bulk(key_values) = &entries[1] {
-                            handle_entry(&key_values[..], &mut allocator, &mut conn).await?;
+
+                        if let Value::Bulk(key_values) = &entry_parts[1] {
+                            if let Err(err) =
+                                handle_entry(&key_values[..], &mut allocator, &mut conn).await
+                            {
+                                error!(error = %err, "Failed processing backtest entry");
+                            }
                         }
                     }
                 }
@@ -134,7 +169,8 @@ async fn main() -> Result<()> {
                 continue;
             }
             other => {
-                return Err(anyhow!("Unexpected Redis response: {other:?}"));
+                warn!("Unexpected Redis response: {other:?}");
+                sleep(Duration::from_millis(500)).await;
             }
         }
     }
@@ -162,10 +198,20 @@ async fn handle_entry(
         let payload =
             value_to_string(value).ok_or_else(|| anyhow!("Result field missing payload"))?;
 
-        let envelope: BacktestEnvelope =
-            serde_json::from_str(&payload).context("Failed to deserialize BacktestEnvelope")?;
-        let summary: BacktestSummary = serde_json::from_str(&envelope.result)
-            .context("Failed to deserialize BacktestSummary")?;
+        let envelope: BacktestEnvelope = match serde_json::from_str(&payload) {
+            Ok(envelope) => envelope,
+            Err(err) => {
+                warn!(%err, "Skipping malformed backtest envelope");
+                continue;
+            }
+        };
+        let summary: BacktestSummary = match serde_json::from_str(&envelope.result) {
+            Ok(summary) => summary,
+            Err(err) => {
+                warn!(%err, "Skipping malformed backtest summary");
+                continue;
+            }
+        };
 
         let allocations = allocator.incorporate(&summary);
         publish_allocations(conn, &allocations).await?;

@@ -1,6 +1,6 @@
 use crate::config;
 use crate::database::Database;
-use crate::jupiter::{JupiterClient, QuoteRequest, SwapRequest};
+use crate::jupiter::{jupiter_base_url, JupiterClient, QuoteRequest, SwapRequest};
 use crate::mev_protection::{JitoClient as MevJitoClient, MevProtectionManager};
 use crate::risk_manager::{RiskManager, TradeDecision};
 use crate::signer_client;
@@ -172,8 +172,7 @@ impl TradingExecutor {
         let config =
             config::get_config().map_err(|e| anyhow!("Configuration unavailable: {}", e))?;
 
-        let api_url = std::env::var("JUPITER_BASE_URL")
-            .unwrap_or_else(|_| "https://quote-api.jup.ag/v6".to_string());
+        let api_url = jupiter_base_url();
         let jupiter = JupiterClient::new(api_url);
 
         let usdc_mint = std::env::var("USDC_MINT")

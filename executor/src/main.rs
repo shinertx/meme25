@@ -1,6 +1,11 @@
 use executor::{
-    circuit_breaker::CircuitBreaker, config::get_config, database::Database,
-    executor::MasterExecutor, metrics::Metrics, risk_manager::RiskManager,
+    circuit_breaker::CircuitBreaker,
+    config::get_config,
+    database::Database,
+    executor::MasterExecutor,
+    jupiter::{jupiter_base_url, with_jupiter_headers},
+    metrics::Metrics,
+    risk_manager::RiskManager,
 };
 use reqwest::Client;
 use serde_json::json;
@@ -118,16 +123,14 @@ async fn run_smoke_test(config: &executor::config::Config) -> Result<()> {
     }
 
     // Jupiter quote ping (no secrets required)
-    let jup_url = std::env::var("JUPITER_BASE_URL")
-        .unwrap_or_else(|_| "https://quote-api.jup.ag/v6".to_string());
-    let jup_status = client
-        .get(format!("{}/quote", jup_url))
-        .query(&[
-            ("inputMint", "So11111111111111111111111111111111111111112"),
-            ("outputMint", "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"),
-            ("amount", "1000000"),
-            ("slippageBps", "50"),
-        ])
+    let jup_url = jupiter_base_url();
+    let jup_request = client.get(format!("{}/quote", jup_url)).query(&[
+        ("inputMint", "So11111111111111111111111111111111111111112"),
+        ("outputMint", "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"),
+        ("amount", "1000000"),
+        ("slippageBps", "50"),
+    ]);
+    let jup_status = with_jupiter_headers(jup_request)
         .send()
         .await
         .map(|r| r.status().is_success())

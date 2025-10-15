@@ -10,6 +10,7 @@ pub mod momentum_5m;
 pub mod perp_basis_arb;
 pub mod rug_pull_sniffer;
 pub mod social_buzz;
+pub mod sol_rsi_reversion;
 
 // Re-export Strategy trait and types
 use crate::strategy_registry::StrategyTrait;
@@ -29,6 +30,7 @@ use shared_models::error::ModelError;
 use shared_models::{Event, StrategyType};
 pub use shared_models::{EventType, MarketEvent, OrderDetails, Strategy, StrategyAction};
 use social_buzz::SocialBuzz;
+use sol_rsi_reversion::SolRsiReversion;
 use std::collections::HashMap;
 use tracing::debug;
 
@@ -157,6 +159,31 @@ pub fn default_strategies() -> HashMap<String, Box<dyn StrategyTrait>> {
             StrategyType::Momentum,
             Momentum5m::default(),
             momentum_params,
+        ),
+    );
+
+    // Oversold bounce strategy tuned for Coinbase SOL
+    let sol_reversion_params = json!({
+        "rsi_length": 14,
+        "oversold_level": 18.0,
+        "exit_level": 45.0,
+        "min_drop_pct": 0.012,
+        "drop_lookback_minutes": 60,
+        "min_recent_drop_pct": 1.0,
+        "bounce_take_profit_pct": 0.03,
+        "hard_stop_pct": 0.035,
+        "max_hold_minutes": 180,
+        "cooldown_minutes": 180,
+        "trade_size_usd": 45.0,
+        "min_liquidity_usd": 5_000_000.0,
+        "min_volume_usd_5m": 2_000_000.0
+    });
+    strategies.insert(
+        "sol_rsi_reversion".into(),
+        StrategyAdapter::boxed_with_params(
+            StrategyType::MeanReversion,
+            SolRsiReversion::default(),
+            sol_reversion_params,
         ),
     );
 
