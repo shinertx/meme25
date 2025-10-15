@@ -8,6 +8,9 @@ set -e
 echo "🤖 MemeSnipe v25 Autonomous Trading System"
 echo "=========================================="
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$SCRIPT_DIR"
+
 # Resolve Codex command (prefer installed CLI, fallback to npx)
 if command -v codex >/dev/null 2>&1; then
     CODEX_CMD="codex"
@@ -47,6 +50,18 @@ load_env_key APPROVE_EDIT_ENV
 load_env_key ENABLE_REAL_TRADING
 load_env_key CODEX_MODEL
 load_env_key OPENAI_MODEL
+
+# Optional market context snapshot for Codex
+MARKET_CONTEXT_FILE="$REPO_ROOT/context/market_context.md"
+generate_market_context() {
+    if command -v python3 >/dev/null 2>&1; then
+        if ! (cd "$REPO_ROOT" && python3 scripts/generate_market_context.py >/dev/null 2>&1); then
+            echo "⚠️  Market context generation failed; continuing without snapshot." >&2
+        fi
+    else
+        echo "⚠️  python3 not available; skipping market context snapshot." >&2
+    fi
+}
 
 # Build optional model override for Codex
 MODEL_ARGS=()
@@ -90,12 +105,15 @@ case "${1:-help}" in
             exit 1
         fi
         
+        echo "🛰️ Generating market context snapshot..."
+        generate_market_context
+
         # Start AI-powered evolution with Codex CLI
-        cd /Users/benjijmac/meme25
+        cd "$REPO_ROOT"
         echo "🤖 Launching AI Agent with 30-minute autonomous cycle..."
-        $CODEX_CMD exec -p default -C /Users/benjijmac/meme25 ${MODEL_ARGS[@]} \
+        $CODEX_CMD exec -p default -C "$REPO_ROOT" ${MODEL_ARGS[@]} \
             --sandbox danger-full-access --dangerously-bypass-approvals-and-sandbox \
-            "Read agents.md. Treat as contract. Loop: PLAN→RESEARCH→CODE→TEST→VALIDATE→DEPLOY. Generate profitable trading strategies. Stop on DoD pass or 30m timeout."
+            "Read agents.md and context/market_context.md. Treat them as binding contract and live market brief. Loop: PLAN→RESEARCH→CODE→TEST→VALIDATE→DEPLOY. Generate profitable trading strategies. Stop on DoD pass or 30m timeout."
         ;;
 
     "auth-check")
@@ -203,11 +221,14 @@ case "${1:-help}" in
             exit 1
         fi
         
-        cd /Users/benjijmac/meme25
+        echo "🛰️ Generating market context snapshot..."
+        generate_market_context
+
+        cd "$REPO_ROOT"
         echo "🤖 AI Agent analyzing strategy performance..."
-        $CODEX_CMD exec -p default -C /Users/benjijmac/meme25 ${MODEL_ARGS[@]} \
+        $CODEX_CMD exec -p default -C "$REPO_ROOT" ${MODEL_ARGS[@]} \
             --sandbox danger-full-access --dangerously-bypass-approvals-and-sandbox \
-            "Run comprehensive backtesting analysis. Execute: python backtest_engine/run_backtest.py. Analyze results. Auto-promote strategies with Sharpe ≥1.5 and drawdown ≤5%. Generate detailed performance report."
+            "Read agents.md and context/market_context.md. Maintain contract constraints. Run comprehensive backtesting analysis. Execute: python backtest_engine/run_backtest.py. Analyze results. Auto-promote strategies with Sharpe ≥1.5 and drawdown ≤5%. Generate detailed performance report."
         ;;
         
     "deploy")
@@ -217,14 +238,14 @@ case "${1:-help}" in
         echo "   - Beginning autonomous operation"
         echo ""
         
-        cd /Users/benjijmac/meme25
+    cd "$REPO_ROOT"
         $COMPOSE_CMD -f docker-compose.efficient.yml up -d
         echo "✅ System deployed and running autonomously"
         ;;
         
     "status")
         echo "📊 System Status:"
-        cd /Users/benjijmac/meme25
+    cd "$REPO_ROOT"
         
         # Check if services are running
         if $COMPOSE_CMD -f docker-compose.efficient.yml ps | grep -q "Up"; then
@@ -253,7 +274,7 @@ case "${1:-help}" in
         echo "   - Monitoring risk controls"
         echo ""
         
-        cd /Users/benjijmac/meme25
+    cd "$REPO_ROOT"
         
         # Stream logs from key services
         $COMPOSE_CMD -f docker-compose.efficient.yml logs -f executor strategy_factory | \
@@ -262,7 +283,7 @@ case "${1:-help}" in
         
     "stop")
         echo "🛑 Stopping Autonomous Trading System..."
-        cd /Users/benjijmac/meme25
+    cd "$REPO_ROOT"
         $COMPOSE_CMD -f docker-compose.efficient.yml down
         echo "✅ System stopped"
         ;;
