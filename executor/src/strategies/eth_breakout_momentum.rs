@@ -249,9 +249,23 @@ impl Strategy for EthBreakoutMomentum {
             return Ok(StrategyAction::Hold);
         }
 
+        // Get immutable values before taking mutable borrow
+        let strategy_id = self.id();
+        let token_addr = tick.token_address.clone();
+        let lookback_hours = self.lookback_hours;
+        let lookback_bars = lookback_hours * BARS_PER_HOUR;
+        let cooldown_minutes = self.cooldown_minutes;
+        let breakout_buffer = self.breakout_buffer;
+        let volume_multiplier = self.volume_multiplier;
+        let slope_min = self.slope_min;
+        let suggested_size_usd = self.suggested_size_usd;
+        let stop_loss_pct = self.stop_loss_pct;
+        let take_profit_pct = self.take_profit_pct;
+        let max_hold_minutes = self.max_hold_minutes;
+
         let history = self
             .histories
-            .entry(tick.token_address.clone())
+            .entry(token_addr.clone())
             .or_insert_with(VecDeque::new);
 
         let bucket_start = floor_to_interval(tick.timestamp, FIVE_MINUTES);
@@ -261,8 +275,8 @@ impl Strategy for EthBreakoutMomentum {
                 Ordering::Less => {
                     // Skip late data, but warn once per token
                     warn!(
-                        strategy = self.id(),
-                        token = %tick.token_address,
+                        strategy = strategy_id,
+                        token = %token_addr,
                         event_time = ?tick.timestamp,
                         bucket_time = ?bucket_start,
                         "Out-of-order price tick encountered"
@@ -289,9 +303,8 @@ impl Strategy for EthBreakoutMomentum {
             });
         }
 
-        trim_history(history, self.lookback_hours);
+        trim_history(history, lookback_hours);
 
-        let lookback_bars = self.lookback_hours * BARS_PER_HOUR;
         if history.len() <= lookback_bars {
             return Ok(StrategyAction::Hold);
         }
@@ -307,7 +320,7 @@ impl Strategy for EthBreakoutMomentum {
                 .timestamp
                 .signed_duration_since(*last_time)
                 .num_minutes()
-                < self.cooldown_minutes
+                < cooldown_minutes
             {
                 return Ok(StrategyAction::Hold);
             }
@@ -359,22 +372,22 @@ impl Strategy for EthBreakoutMomentum {
         let slope = (last_bar.close - slope_baseline) / slope_baseline;
 
         let breakout_condition =
-            last_bar.close > prev_high * (1.0 + self.breakout_buffer + f64::EPSILON);
-        let volume_condition = last_bar.volume > avg_volume * self.volume_multiplier;
-        let slope_condition = slope >= self.slope_min;
+            last_bar.close > prev_high * (1.0 + breakout_buffer + f64::EPSILON);
+        let volume_condition = last_bar.volume > avg_volume * volume_multiplier;
+        let slope_condition = slope >= slope_min;
 
         if breakout_condition && volume_condition && slope_condition {
             let breakout_strength = (last_bar.close / prev_high - 1.0).max(0.0);
             let volume_ratio = last_bar.volume / avg_volume;
-            let slope_ratio = if self.slope_min > 0.0 {
-                (slope / self.slope_min).max(0.0)
+            let slope_ratio = if slope_min > 0.0 {
+                (slope / slope_min).max(0.0)
             } else {
                 1.0
             };
 
             let confidence = compute_confidence(
                 breakout_strength,
-                self.breakout_buffer,
+                breakout_buffer,
                 volume_ratio,
                 slope_ratio,
             );
@@ -383,7 +396,7 @@ impl Strategy for EthBreakoutMomentum {
             let order = OrderDetails {
                 token_address: tick.token_address.clone(),
                 symbol: format!("CBETH_{}", symbol_suffix),
-                suggested_size_usd: self.suggested_size_usd,
+                suggested_size_usd,
                 confidence,
                 side: Side::Long,
                 strategy_metadata: HashMap::from([
@@ -398,15 +411,15 @@ impl Strategy for EthBreakoutMomentum {
                 ]),
                 risk_metrics: RiskMetrics {
                     position_size_pct: 0.02,
-                    stop_loss_price: Some(last_bar.close * (1.0 - self.stop_loss_pct)),
-                    take_profit_price: Some(last_bar.close * (1.0 + self.take_profit_pct)),
+                    stop_loss_price: Some(last_bar.close * (1.0 - stop_loss_pct)),
+                    take_profit_price: Some(last_bar.close * (1.0 + take_profit_pct)),
                     max_slippage_bps: 25,
-                    time_limit_seconds: Some(self.max_hold_minutes * 60),
+                    time_limit_seconds: Some(max_hold_minutes * 60),
                 },
             };
 
             info!(
-                strategy = self.id(),
+                strategy = strategy_id,
                 token = %tick.token_address,
                 price = last_bar.close,
                 prev_high,
@@ -483,7 +496,7 @@ fn update_history(
                     token,
                     event_bucket = ?bucket_start,
                     last_bucket = ?last.bucket_start,
-                    \"Out-of-order price tick encountered\"
+                    "Out-of-order price tick encountered"
                 );
             }
             Ordering::Equal => {
@@ -568,8 +581,7 @@ fn compute_metrics(
     let slope = (last_bar.close - slope_baseline) / slope_baseline;
     let volume_ratio = last_bar.volume / avg_volume;
 
-    let breakout_condition =
-        last_bar.close > prev_high * (1.0 + breakout_buffer + f64::EPSILON);
+    let breakout_condition = last_bar.close > prev_high * (1.0 + breakout_buffer + f64::EPSILON);
     let volume_condition = last_bar.volume > avg_volume * volume_multiplier;
     let slope_condition = slope >= slope_min;
 
