@@ -252,6 +252,7 @@ impl PnLTracker {
     }
 
     /// Record a new trade execution
+    #[allow(clippy::too_many_arguments)]
     pub fn record_trade(
         &mut self,
         symbol: &str,
@@ -268,7 +269,7 @@ impl PnLTracker {
             .entry(symbol.to_string())
             .or_insert(Position {
                 symbol: symbol.to_string(),
-                side: side.clone(),
+                side,
                 quantity: 0.0,
                 average_price: 0.0,
                 current_price: price,

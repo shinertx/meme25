@@ -66,6 +66,7 @@ impl Config {
         })
     }
 
+    #[allow(clippy::neg_cmp_op_on_partial_ord)]
     pub fn validate(self) -> Result<Self> {
         macro_rules! ensure {
             ($cond:expr, $msg:literal) => {

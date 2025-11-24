@@ -304,7 +304,7 @@ impl ExecutionTimer {
     /// Calculate spread impact factor
     fn calculate_spread_factor(&self, spread_tightness: f64) -> f64 {
         // Higher spread tightness = better conditions
-        spread_tightness.min(1.0).max(0.0)
+        spread_tightness.clamp(0.0, 1.0)
     }
 
     /// Calculate momentum impact factor

@@ -4,6 +4,7 @@ use sqlx::{PgPool, Row};
 use std::collections::HashMap;
 use tokio::sync::RwLock;
 
+#[allow(clippy::large_enum_variant)]
 pub enum Database {
     Live {
         pool: PgPool,

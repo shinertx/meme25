@@ -15,6 +15,12 @@ pub struct StrategyRegistry {
     strategies: HashMap<String, Box<dyn StrategyTrait>>,
 }
 
+impl Default for StrategyRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl StrategyRegistry {
     pub fn new() -> Self {
         Self {
@@ -88,6 +94,12 @@ pub struct MomentumStrategy {
     active: bool,
 }
 
+impl Default for MomentumStrategy {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MomentumStrategy {
     pub fn new() -> Self {
         Self { active: true }
@@ -114,6 +126,12 @@ pub struct MeanReversionStrategy {
     active: bool,
 }
 
+impl Default for MeanReversionStrategy {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MeanReversionStrategy {
     pub fn new() -> Self {
         Self { active: true }
@@ -138,6 +156,12 @@ impl StrategyTrait for MeanReversionStrategy {
 
 pub struct ArbitrageStrategy {
     active: bool,
+}
+
+impl Default for ArbitrageStrategy {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl ArbitrageStrategy {

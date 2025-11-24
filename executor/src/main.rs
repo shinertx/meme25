@@ -34,7 +34,7 @@ async fn main() -> Result<()> {
         .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
         .unwrap_or(false)
     {
-        return run_smoke_test(&config).await;
+        return run_smoke_test(config).await;
     }
 
     // Initialize metrics
@@ -42,7 +42,7 @@ async fn main() -> Result<()> {
     info!("Metrics initialized on port {:?}", config.metrics_port);
 
     // Prepare risk manager with metrics
-    let mut risk_manager = RiskManager::from_config(&config);
+    let mut risk_manager = RiskManager::from_config(config);
     risk_manager.attach_metrics(Arc::clone(&metrics));
     let risk_manager = Arc::new(risk_manager);
 
@@ -167,7 +167,7 @@ async fn run_smoke_test(config: &executor::config::Config) -> Result<()> {
     // Exit with error if critical pings fail (require Solana only)
     if !sol_ok {
         return Err(
-            shared_models::error::ModelError::Network("Smoke test failed: solana".into()).into(),
+            shared_models::error::ModelError::Network("Smoke test failed: solana".into()),
         );
     }
 

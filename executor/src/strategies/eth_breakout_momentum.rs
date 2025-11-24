@@ -19,6 +19,7 @@ struct FiveMinuteBar {
     volume: f64,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy)]
 struct SignalMetrics {
     last_price: f64,
@@ -266,7 +267,7 @@ impl Strategy for EthBreakoutMomentum {
         let history = self
             .histories
             .entry(token_addr.clone())
-            .or_insert_with(VecDeque::new);
+            .or_default();
 
         let bucket_start = floor_to_interval(tick.timestamp, FIVE_MINUTES);
 
@@ -478,6 +479,7 @@ fn trim_history(history: &mut VecDeque<FiveMinuteBar>, lookback_hours: usize) {
     }
 }
 
+#[allow(dead_code)]
 fn update_history(
     history: &mut VecDeque<FiveMinuteBar>,
     bucket_start: DateTime<Utc>,
@@ -521,6 +523,7 @@ fn update_history(
     }
 }
 
+#[allow(dead_code)]
 fn compute_metrics(
     history: &VecDeque<FiveMinuteBar>,
     lookback_hours: usize,

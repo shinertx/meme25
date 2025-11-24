@@ -9,6 +9,7 @@ pub struct AutonomousEvolutionEngine {
     coder: AutonomousCoder,
     generation: u32,
     population_size: usize,
+    #[allow(dead_code)]
     mutation_rate: f64,
 }
 
@@ -128,14 +129,12 @@ impl AutonomousEvolutionEngine {
     }
 
     fn generate_mutations(&self) -> Vec<StrategyTemplate> {
-        let timeframes = vec!["1m", "3m", "5m", "15m"];
-        let indicators = vec!["EMA", "SMA", "RSI", "MACD", "ATR", "Bollinger"];
-        let conditions = vec![
-            "volume_spike",
+        let timeframes = ["1m", "3m", "5m", "15m"];
+        let indicators = ["EMA", "SMA", "RSI", "MACD", "ATR", "Bollinger"];
+        let conditions = ["volume_spike",
             "price_momentum_up",
             "price_momentum_down",
-            "high_liquidity",
-        ];
+            "high_liquidity"];
 
         (0..self.population_size)
             .map(|i| {

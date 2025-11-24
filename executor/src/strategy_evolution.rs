@@ -295,14 +295,14 @@ impl StrategyEvolution {
 
         self.performance_history
             .entry(strategy_id.to_string())
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(record);
 
         // Update candidate metrics if in population - handle borrowing carefully
         let strategy_id_str = strategy_id;
 
         // Calculate stability score first (no mutable borrow)
-        let stability_score = self.calculate_stability_score(&strategy_id_str);
+        let stability_score = self.calculate_stability_score(strategy_id_str);
 
         // Create metrics struct
         let new_metrics = CandidateMetrics {

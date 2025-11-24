@@ -63,6 +63,12 @@ pub enum MarketRegime {
     Discovery, // New market opportunities
 }
 
+impl Default for PortfolioAllocator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PortfolioAllocator {
     pub fn new() -> Self {
         let mut strategy_weights = HashMap::new();
@@ -121,7 +127,7 @@ impl PortfolioAllocator {
         let history = self
             .performance_history
             .entry(strategy_id.to_string())
-            .or_insert_with(Vec::new);
+            .or_default();
         history.push(performance);
 
         // Keep only last 30 days of data
@@ -337,7 +343,7 @@ impl PortfolioAllocator {
 
     /// Apply allocation constraints (min/max limits)
     fn apply_allocation_constraints(&mut self) -> Result<()> {
-        for (_, weight) in &mut self.strategy_weights {
+        for weight in self.strategy_weights.values_mut() {
             if weight.is_active {
                 weight.target_weight = weight
                     .target_weight
@@ -358,7 +364,7 @@ impl PortfolioAllocator {
             .sum();
 
         if total_weight > 0.0 {
-            for (_, weight) in &mut self.strategy_weights {
+            for weight in self.strategy_weights.values_mut() {
                 if weight.is_active {
                     weight.target_weight /= total_weight;
                 }
@@ -429,7 +435,7 @@ impl PortfolioAllocator {
         }
 
         let equal_weight = 1.0 / active_count as f64;
-        for (_, weight) in &mut self.strategy_weights {
+        for weight in self.strategy_weights.values_mut() {
             weight.target_weight = if weight.is_active { equal_weight } else { 0.0 };
         }
         Ok(())

@@ -24,7 +24,7 @@ pub async fn get_pubkey() -> Result<String> {
 
     let client = get_client()?;
     let response = client
-        .get(&format!("{}/pubkey", CONFIG.signer_url))
+        .get(format!("{}/pubkey", CONFIG.signer_url))
         .send()
         .await?;
 
@@ -51,7 +51,7 @@ pub async fn sign_transaction(transaction_b64: &str) -> Result<String> {
 
     let client = get_client()?;
     let response = client
-        .post(&format!("{}/sign", CONFIG.signer_url))
+        .post(format!("{}/sign", CONFIG.signer_url))
         .json(&request)
         .send()
         .await?;

@@ -117,6 +117,12 @@ pub struct StrategyCostAttribution {
     pub net_alpha_after_costs_bps: f64,
 }
 
+impl Default for TransactionCostAnalyzer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TransactionCostAnalyzer {
     pub fn new() -> Self {
         Self {
@@ -267,9 +273,7 @@ impl TransactionCostAnalyzer {
         };
         let fee_score = (50.0 - fee_rate.min(50.0)) / 50.0;
 
-        (0.5 * slippage_score + 0.3 * latency_score + 0.2 * fee_score)
-            .max(0.0)
-            .min(1.0)
+        (0.5 * slippage_score + 0.3 * latency_score + 0.2 * fee_score).clamp(0.0, 1.0)
     }
 
     /// Check if analysis should be run
@@ -389,9 +393,7 @@ impl TransactionCostAnalyzer {
         let latency_score = (2000.0 - avg_latency.min(2000.0)) / 2000.0;
         let fee_score = (50.0 - fee_rate.min(50.0)) / 50.0;
 
-        (0.5 * slippage_score + 0.3 * latency_score + 0.2 * fee_score)
-            .max(0.0)
-            .min(1.0)
+        (0.5 * slippage_score + 0.3 * latency_score + 0.2 * fee_score).clamp(0.0, 1.0)
     }
 
     /// Calculate strategy-specific cost attribution
@@ -402,7 +404,7 @@ impl TransactionCostAnalyzer {
         for trade in self.trade_records.values() {
             strategy_trades
                 .entry(trade.strategy_id.clone())
-                .or_insert_with(Vec::new)
+                .or_default()
                 .push(trade);
         }
 

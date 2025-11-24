@@ -96,7 +96,7 @@ impl CircuitBreaker {
             redis,
             breach_counters: HashMap::new(),
             last_check: Instant::now(),
-            adaptive_thresholds: AdaptiveThresholds::default(),
+            adaptive_thresholds: AdaptiveThresholds::new(),
             circuit_states: HashMap::new(),
             recovery_manager: RecoveryManager::new(),
         }
@@ -168,11 +168,7 @@ impl CircuitBreaker {
 
         // Portfolio drawdown check
         let portfolio_drawdown: f64 = conn.get("portfolio_drawdown").await.unwrap_or(0.0);
-        if portfolio_drawdown.abs() > self.adaptive_thresholds.portfolio_drawdown_emergency {
-            triggers.push(CircuitTrigger::PortfolioDrawdown(portfolio_drawdown));
-        } else if portfolio_drawdown.abs() > self.adaptive_thresholds.portfolio_drawdown_halt {
-            triggers.push(CircuitTrigger::PortfolioDrawdown(portfolio_drawdown));
-        } else if portfolio_drawdown.abs() > self.adaptive_thresholds.portfolio_drawdown_warning {
+        if portfolio_drawdown.abs() > self.adaptive_thresholds.portfolio_drawdown_warning {
             triggers.push(CircuitTrigger::PortfolioDrawdown(portfolio_drawdown));
         }
 
@@ -180,9 +176,7 @@ impl CircuitBreaker {
         let daily_pnl: f64 = conn.get("daily_pnl").await.unwrap_or(0.0);
         let daily_loss_pct = daily_pnl / self.cfg.max_portfolio_size_usd * 100.0;
 
-        if daily_loss_pct < -self.adaptive_thresholds.daily_loss_halt {
-            triggers.push(CircuitTrigger::DailyLoss(daily_loss_pct));
-        } else if daily_loss_pct < -self.adaptive_thresholds.daily_loss_warning {
+        if daily_loss_pct < -self.adaptive_thresholds.daily_loss_warning {
             triggers.push(CircuitTrigger::DailyLoss(daily_loss_pct));
         }
 
@@ -297,13 +291,13 @@ impl CircuitBreaker {
         let mut highest_severity = CircuitState::Normal;
 
         for trigger in &triggers {
-            let severity = self.determine_severity(&trigger);
+            let severity = self.determine_severity(trigger);
             if self.is_more_severe(&severity, &highest_severity) {
                 highest_severity = severity.clone();
             }
 
-            self.log_trigger(&trigger, &severity);
-            self.increment_breach_counter(&trigger);
+            self.log_trigger(trigger, &severity);
+            self.increment_breach_counter(trigger);
 
             let key = Self::trigger_key(trigger);
             self.circuit_states.insert(key, severity.clone());
@@ -539,7 +533,7 @@ impl CircuitBreaker {
 }
 
 impl AdaptiveThresholds {
-    pub fn default() -> Self {
+    pub fn new() -> Self {
         Self {
             portfolio_drawdown_warning: 0.03,     // 3%
             portfolio_drawdown_halt: 0.05,        // 5%
@@ -553,6 +547,18 @@ impl AdaptiveThresholds {
             liquidity_degradation_threshold: 0.5, // 50%
             correlation_concentration_limit: 0.6, // 60%
         }
+    }
+}
+
+impl Default for AdaptiveThresholds {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Default for RecoveryManager {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

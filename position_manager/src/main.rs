@@ -262,6 +262,7 @@ async fn main() -> Result<()> {
 }
 
 #[derive(Debug, Clone, FromRow)]
+#[allow(dead_code)]
 struct OpenTradeRecord {
     trade_uuid: Uuid,
     strategy_id: String,

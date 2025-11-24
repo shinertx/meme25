@@ -253,13 +253,13 @@ impl EventLoop {
             .ok_or_else(|| ModelError::Redis("Missing event data".into()))?;
 
         let event_type_str = match event_type_value {
-            redis::Value::Data(bytes) => std::str::from_utf8(&bytes)
+            redis::Value::Data(bytes) => std::str::from_utf8(bytes)
                 .map_err(|e| ModelError::Redis(format!("Invalid UTF-8 in event type: {}", e)))?,
             _ => return Err(ModelError::Redis("Event type is not a string".into())),
         };
 
         let event_data_str = match event_data_value {
-            redis::Value::Data(bytes) => std::str::from_utf8(&bytes)
+            redis::Value::Data(bytes) => std::str::from_utf8(bytes)
                 .map_err(|e| ModelError::Redis(format!("Invalid UTF-8 in event data: {}", e)))?,
             _ => return Err(ModelError::Redis("Event data is not a string".into())),
         };

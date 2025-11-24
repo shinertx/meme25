@@ -103,9 +103,7 @@ where
             self.initialized = true;
         }
 
-        let market_event = match event {
-            Event::Market(ref market_event) => market_event,
-        };
+        let Event::Market(ref market_event) = event;
 
         let action = self
             .inner
@@ -202,23 +200,23 @@ pub fn default_strategies() -> HashMap<String, Box<dyn StrategyTrait>> {
     );
     strategies.insert(
         "liquidity_migration".into(),
-        StrategyAdapter::boxed(StrategyType::LiquidityMining, LiquidityMigration::default()),
+        StrategyAdapter::boxed(StrategyType::LiquidityMining, LiquidityMigration),
     );
     strategies.insert(
         "perp_basis_arb".into(),
-        StrategyAdapter::boxed(StrategyType::Arbitrage, PerpBasisArb::default()),
+        StrategyAdapter::boxed(StrategyType::Arbitrage, PerpBasisArb),
     );
     strategies.insert(
         "dev_wallet_drain".into(),
-        StrategyAdapter::boxed(StrategyType::EventDriven, DevWalletDrain::default()),
+        StrategyAdapter::boxed(StrategyType::EventDriven, DevWalletDrain),
     );
     strategies.insert(
         "airdrop_rotation".into(),
-        StrategyAdapter::boxed(StrategyType::TrendFollowing, AirdropRotation::default()),
+        StrategyAdapter::boxed(StrategyType::TrendFollowing, AirdropRotation),
     );
     strategies.insert(
         "korean_time_burst".into(),
-        StrategyAdapter::boxed(StrategyType::BreakoutReversion, KoreanTimeBurst::default()),
+        StrategyAdapter::boxed(StrategyType::BreakoutReversion, KoreanTimeBurst),
     );
     strategies.insert(
         "bridge_inflow".into(),
@@ -226,7 +224,7 @@ pub fn default_strategies() -> HashMap<String, Box<dyn StrategyTrait>> {
     );
     strategies.insert(
         "rug_pull_sniffer".into(),
-        StrategyAdapter::boxed(StrategyType::VolumeAnomaly, RugPullSniffer::default()),
+        StrategyAdapter::boxed(StrategyType::VolumeAnomaly, RugPullSniffer),
     );
 
     strategies
@@ -269,31 +267,31 @@ pub fn live_strategy_configs() -> Vec<LiveStrategyConfig> {
         LiveStrategyConfig {
             id: "liquidity_migration",
             params: json!({}),
-            constructor: || Box::new(LiquidityMigration::default()),
+            constructor: || Box::new(LiquidityMigration),
             default_live: false,
         },
         LiveStrategyConfig {
             id: "perp_basis_arb",
             params: json!({}),
-            constructor: || Box::new(PerpBasisArb::default()),
+            constructor: || Box::new(PerpBasisArb),
             default_live: false,
         },
         LiveStrategyConfig {
             id: "dev_wallet_drain",
             params: json!({}),
-            constructor: || Box::new(DevWalletDrain::default()),
+            constructor: || Box::new(DevWalletDrain),
             default_live: false,
         },
         LiveStrategyConfig {
             id: "airdrop_rotation",
             params: json!({}),
-            constructor: || Box::new(AirdropRotation::default()),
+            constructor: || Box::new(AirdropRotation),
             default_live: false,
         },
         LiveStrategyConfig {
             id: "korean_time_burst",
             params: json!({}),
-            constructor: || Box::new(KoreanTimeBurst::default()),
+            constructor: || Box::new(KoreanTimeBurst),
             default_live: false,
         },
         LiveStrategyConfig {
@@ -305,7 +303,7 @@ pub fn live_strategy_configs() -> Vec<LiveStrategyConfig> {
         LiveStrategyConfig {
             id: "rug_pull_sniffer",
             params: json!({}),
-            constructor: || Box::new(RugPullSniffer::default()),
+            constructor: || Box::new(RugPullSniffer),
             default_live: false,
         },
     ]

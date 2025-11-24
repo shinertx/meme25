@@ -558,10 +558,10 @@ async fn poll_dexscreener_newpairs(conn: &mut MultiplexedConnection) -> Result<(
         if addr.is_empty() || price <= 0.0 {
             continue;
         }
-        if (age_min as i64) > max_age_min {
+        if age_min > max_age_min {
             continue;
         }
-        if (age_min as i64) < min_age_min {
+        if age_min < min_age_min {
             continue;
         }
         if liq < min_liq {
@@ -570,7 +570,7 @@ async fn poll_dexscreener_newpairs(conn: &mut MultiplexedConnection) -> Result<(
         if vol_h < min_vol {
             continue;
         }
-        let age_score = (max_age_min - age_min as i64).max(0) as f64;
+        let age_score = (max_age_min - age_min).max(0) as f64;
         let score = liq + age_score * 100.0;
         scored.push((score, p));
     }

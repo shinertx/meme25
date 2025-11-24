@@ -2,11 +2,10 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
-use std::path::Path;
 use std::process::Stdio;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
-use tracing::{error, info, warn};
+use tracing::info;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StrategyTemplate {
@@ -177,7 +176,7 @@ Generate complete, compilable Rust test code.
 
         // Execute Codex CLI command
         let mut cmd = Command::new("codex")
-            .args(&[
+            .args([
                 "exec", 
                 &format!("Read {}. Generate production-ready Rust code following the specifications exactly. Output only the Rust code, no explanations.", temp_file)
             ])
@@ -223,6 +222,7 @@ Generate complete, compilable Rust test code.
     }
 
     /// Generate Rust strategy code from template (Legacy - kept for fallback)
+    #[allow(dead_code)]
     fn generate_strategy_code(&self, template: &StrategyTemplate) -> Result<String> {
         let strategy_name = format!("{}Strategy", to_pascal_case(&template.name));
 
@@ -293,7 +293,7 @@ impl {strategy_name} {{
             self.entry_price = tick.price_usd;
             self.entry_time = tick.timestamp;
             
-            info!("Strategy {} entering position at ${{}}", "{}", tick.price_usd);
+            info!("Strategy {{}} entering position at ${{}}", "{strategy_name}", tick.price_usd);
             
             return Ok(Some(StrategyAction::Buy {{
                 token_address: tick.token_address.clone(),
@@ -308,7 +308,7 @@ impl {strategy_name} {{
             self.in_position = false;
             
             let pnl_pct = ((tick.price_usd - self.entry_price) / self.entry_price) * 100.0;
-            info!("Strategy {} exiting position, PnL: {{:.2}}%", "{}", pnl_pct);
+            info!("Strategy {{}} exiting position, PnL: {{:.2}}%", "{strategy_name}", pnl_pct);
             
             return Ok(Some(StrategyAction::Sell {{
                 token_address: tick.token_address.clone(),
@@ -361,6 +361,7 @@ impl {strategy_name} {{
         Ok(code)
     }
 
+    #[allow(dead_code)]
     fn generate_param_fields(&self, indicators: &[String]) -> String {
         indicators
             .iter()
@@ -415,6 +416,7 @@ impl {strategy_name} {{
         }
     }
 
+    #[allow(dead_code)]
     fn generate_test_code(&self, template: &StrategyTemplate) -> Result<String> {
         let strategy_name = format!("{}Strategy", to_pascal_case(&template.name));
 
@@ -465,14 +467,14 @@ mod tests {{
 
     async fn run_tests(&self, strategy_name: &str) -> Result<String> {
         let output = Command::new("cargo")
-            .args(&["test", &format!("test_{}", strategy_name)])
+            .args(["test", &format!("test_{}", strategy_name)])
             .output()
             .await?;
 
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
     }
 
-    async fn run_backtest(&self, template: &StrategyTemplate) -> Result<BacktestMetrics> {
+    async fn run_backtest(&self, _template: &StrategyTemplate) -> Result<BacktestMetrics> {
         // This would call the backtest engine
         // For now, return mock metrics
         Ok(BacktestMetrics {
@@ -497,7 +499,7 @@ mod tests {{
 
                 // Add files
                 Command::new("git")
-                    .args(&["add", &result.file_path])
+                    .args(["add", &result.file_path])
                     .output()
                     .await?;
 
@@ -508,13 +510,13 @@ mod tests {{
                 );
 
                 Command::new("git")
-                    .args(&["commit", "-m", &commit_msg])
+                    .args(["commit", "-m", &commit_msg])
                     .output()
                     .await?;
 
                 // Push to GitHub
                 Command::new("git")
-                    .args(&["push", "origin", "main"])
+                    .args(["push", "origin", "main"])
                     .output()
                     .await?;
 
@@ -526,6 +528,7 @@ mod tests {{
     }
 }
 
+#[allow(dead_code)]
 fn to_pascal_case(s: &str) -> String {
     s.split('_')
         .map(|word| {

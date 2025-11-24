@@ -284,7 +284,7 @@ impl RiskOverlay {
             .entry(symbol.to_string())
             .or_insert(PositionRisk {
                 symbol: symbol.to_string(),
-                side: side.clone(),
+                side,
                 size_usd: 0.0,
                 entry_price: price,
                 current_price: price,
@@ -519,7 +519,7 @@ impl RiskOverlay {
         let portfolio_value = self.calculate_portfolio_value();
         self.current_positions
             .values()
-            .map(|p| (p.size_usd.abs() / portfolio_value * 100.0))
+            .map(|p| p.size_usd.abs() / portfolio_value * 100.0)
             .fold(0.0, f64::max)
     }
 
@@ -531,8 +531,8 @@ impl RiskOverlay {
         let mut total_correlation = 0.0;
         let mut count = 0;
 
-        for (symbol1, _) in &self.current_positions {
-            for (symbol2, _) in &self.current_positions {
+        for symbol1 in self.current_positions.keys() {
+            for symbol2 in self.current_positions.keys() {
                 if symbol1 != symbol2 {
                     if let Some(correlation_map) = self.correlation_matrix.get(symbol1) {
                         if let Some(correlation) = correlation_map.get(symbol2) {

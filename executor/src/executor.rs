@@ -615,12 +615,11 @@ impl MasterExecutor {
         let event: Event = serde_json::from_str(&data)
             .with_context(|| format!("Failed to parse event payload on {}", stream_key))?;
 
-        if let Event::Market(market_event) = event {
-            let actions = self.trading_executor.process_event(&market_event).await?;
-            for (strategy_name, action) in actions {
-                self.handle_action(&strategy_name, &market_event, action)
-                    .await?;
-            }
+        let Event::Market(market_event) = event;
+        let actions = self.trading_executor.process_event(&market_event).await?;
+        for (strategy_name, action) in actions {
+            self.handle_action(&strategy_name, &market_event, action)
+                .await?;
         }
 
         Ok(())
