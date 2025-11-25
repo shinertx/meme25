@@ -231,6 +231,9 @@ impl Strategy for EthBreakoutMomentum {
             return Ok(StrategyAction::Hold);
         };
 
+        // Capture the strategy id before any mutable borrows
+        let strategy_id = self.id();
+
         if let Some(allowed) = &self.allowed_tokens {
             if !allowed.contains(&tick.token_address) {
                 return Ok(StrategyAction::Hold);
@@ -261,7 +264,7 @@ impl Strategy for EthBreakoutMomentum {
                 Ordering::Less => {
                     // Skip late data, but warn once per token
                     warn!(
-                        strategy = self.id(),
+                        strategy = strategy_id,
                         token = %tick.token_address,
                         event_time = ?tick.timestamp,
                         bucket_time = ?bucket_start,
@@ -406,7 +409,7 @@ impl Strategy for EthBreakoutMomentum {
             };
 
             info!(
-                strategy = self.id(),
+                strategy = strategy_id,
                 token = %tick.token_address,
                 price = last_bar.close,
                 prev_high,
@@ -483,7 +486,7 @@ fn update_history(
                     token,
                     event_bucket = ?bucket_start,
                     last_bucket = ?last.bucket_start,
-                    \"Out-of-order price tick encountered\"
+                    "Out-of-order price tick encountered"
                 );
             }
             Ordering::Equal => {

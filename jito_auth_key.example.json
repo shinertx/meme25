@@ -1,0 +1,5 @@
+{
+  "_comment": "PAPER TRADING ONLY - Replace with real Jito auth keypair for live trading",
+  "pubkey": "REPLACE_WITH_YOUR_JITO_AUTH_PUBKEY",
+  "secretKey": [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]
+}

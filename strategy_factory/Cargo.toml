@@ -3,13 +3,13 @@ name    = "strategy_factory"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+name = "strategy_factory"
+path = "src/lib.rs"
+
 [[bin]]
 name = "strategy_factory"
 path = "src/main.rs"
-
-[[bin]]
-name = "evolution_engine"
-path = "src/evolution_engine.rs"
 
 [dependencies]
 anyhow       = "1.0"
