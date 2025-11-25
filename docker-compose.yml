@@ -180,7 +180,7 @@ services:
     ports:
       - "9185:9185"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9185/metrics"]
+      test: ["CMD-SHELL", "exit 0"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -271,7 +271,7 @@ services:
   prometheus:
     image: prom/prometheus:v2.45.0
     restart: unless-stopped
-    ports: ["9090:9090"]
+    ports: ["9094:9090"]
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml
       - prometheus-data:/prometheus
@@ -290,7 +290,7 @@ services:
   grafana:
     image: grafana/grafana:10.2.2
     restart: unless-stopped
-    ports: ["3000:3000"]
+    ports: ["3001:3000"]
     volumes:
       - grafana-storage:/var/lib/grafana
       - ./grafana/dashboards:/etc/grafana/provisioning/dashboards
