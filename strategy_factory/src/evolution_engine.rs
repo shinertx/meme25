@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use tokio::time::{sleep, Duration};
 use tracing::{info, warn};
 
-use crate::autonomous_coder::{AutonomousCoder, BacktestMetrics, StrategyTemplate};
+use strategy_factory::autonomous_coder::{AutonomousCoder, BacktestMetrics, StrategyTemplate, CodeGenResult};
 
 pub struct AutonomousEvolutionEngine {
     coder: AutonomousCoder,
@@ -176,7 +176,7 @@ impl AutonomousEvolutionEngine {
 
     fn select_survivors(
         &self,
-        results: &[(StrategyTemplate, crate::autonomous_coder::CodeGenResult)],
+        results: &[(StrategyTemplate, CodeGenResult)],
     ) {
         let mut scored: Vec<_> = results
             .iter()
