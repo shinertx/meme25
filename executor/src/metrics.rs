@@ -279,7 +279,7 @@ impl Metrics {
     }
 
     /// Create a timing context for comprehensive execution measurement
-    pub fn start_execution_timer(&self) -> ExecutionTimer {
+    pub fn start_execution_timer(&self) -> ExecutionTimer<'_> {
         ExecutionTimer::new(self)
     }
 }

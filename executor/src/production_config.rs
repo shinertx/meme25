@@ -170,7 +170,7 @@ impl ProductionConfig {
             std::env::var("DEPLOYMENT_ENV").unwrap_or_else(|_| "development".to_string());
 
         match environment.as_str() {
-            "production" => Self::production_config(),
+            "production" => Self::new_production(),
             "staging" => Self::staging_config(),
             "development" => Self::development_config(),
             _ => {
@@ -183,7 +183,7 @@ impl ProductionConfig {
         }
     }
 
-    pub fn production_config() -> Result<Self> {
+    pub fn new_production() -> Result<Self> {
         info!("Loading production configuration");
 
         Ok(ProductionConfig {
@@ -380,7 +380,7 @@ impl ProductionConfig {
     pub fn staging_config() -> Result<Self> {
         info!("Loading staging configuration");
 
-        let mut config = Self::production_config()?;
+        let mut config = Self::new_production()?;
 
         // Override staging-specific settings
         config.deployment.environment = "staging".to_string();

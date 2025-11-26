@@ -137,6 +137,12 @@ pub enum AlertSeverity {
     Critical,
 }
 
+impl Default for PerformanceAttributor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PerformanceAttributor {
     pub fn new() -> Self {
         Self {
@@ -348,12 +354,10 @@ impl PerformanceAttributor {
         // Calmar ratio (annual return / max drawdown)
         perf.calmar_ratio = if perf.max_drawdown_pct > 0.0 {
             (mean_return * 365.0) / perf.max_drawdown_pct // Annualized
+        } else if mean_return > 0.0 {
+            f64::INFINITY
         } else {
-            if mean_return > 0.0 {
-                f64::INFINITY
-            } else {
-                0.0
-            }
+            0.0
         };
 
         // Apply pre-calculated scores
@@ -372,7 +376,7 @@ impl PerformanceAttributor {
         let entry = self
             .daily_snapshots
             .entry(snapshot.strategy_id.clone())
-            .or_insert_with(Vec::new);
+            .or_default();
         entry.push(snapshot);
         if entry.len() > 365 {
             entry.remove(0);

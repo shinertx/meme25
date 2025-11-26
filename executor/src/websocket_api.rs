@@ -273,6 +273,7 @@ impl WebSocketServer {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn handle_client(
         stream: TcpStream,
         clients: Arc<RwLock<HashMap<String, ClientConnection>>>,

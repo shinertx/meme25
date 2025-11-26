@@ -108,6 +108,12 @@ pub struct AdvancedCircuitBreakers {
     cascade_delay_seconds: u64,
 }
 
+impl Default for AdvancedCircuitBreakers {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AdvancedCircuitBreakers {
     pub fn new() -> Self {
         Self {
@@ -559,7 +565,7 @@ impl AdvancedCircuitBreakers {
             }
             _ => {
                 // Try to trigger another named breaker
-                if let Some(_) = self.breakers.read().await.get(cascade_target) {
+                if self.breakers.read().await.get(cascade_target).is_some() {
                     debug!(
                         "CASCADE: Triggering breaker {} from {}",
                         cascade_target, source_trigger.breaker_name
@@ -691,7 +697,7 @@ impl AdvancedCircuitBreakers {
             }
         }
 
-        report.push_str(&format!("\nSystem State:\n"));
+        report.push_str("\nSystem State:\n");
         report.push_str(&format!(
             "• Portfolio Value: ${:.2}\n",
             self.portfolio_value

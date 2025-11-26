@@ -1,5 +1,24 @@
 # MemeSnipe v25 — Autonomous Memecoin Trading System
 
+## ⚠️ **Production Status: IN DEVELOPMENT**
+
+**Current Status**: 🟡 Code Complete, Security Hardening Required  
+**Production Ready**: ❌ NOT YET - Critical security items must be addressed  
+**Last Updated**: 2025-11-24
+
+### Quick Status
+- ✅ **Code Quality**: EXCELLENT - Zero compilation errors, all clippy warnings resolved
+- ✅ **Risk Management**: Comprehensive circuit breakers and limits implemented
+- 🔴 **Security**: HIGH RISK - Critical issues require 2-3 weeks of work
+- 🟡 **Strategy Validation**: 11 strategies identified, testing required
+- 🟡 **Documentation**: Comprehensive guides created, operational docs needed
+
+**See [PRODUCTION_READINESS.md](PRODUCTION_READINESS.md) for complete checklist**  
+**See [SECURITY_AUDIT.md](SECURITY_AUDIT.md) for security assessment**  
+**See [UPGRADE_SUMMARY.md](UPGRADE_SUMMARY.md) for detailed upgrade report**
+
+---
+
 ## 🎯 **What This Project Does**
 
 **MemeSnipe v25** is a production-grade, autonomous trading system designed to turn $200 into $1M by trading Solana memecoins. It operates as a sophisticated ensemble of 10 parallel trading strategies that collectively analyze real-time market data and execute trades with institutional-grade risk management.

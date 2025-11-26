@@ -158,6 +158,12 @@ pub struct PerformanceDashboard {
     peak_portfolio_value: f64,
 }
 
+impl Default for PerformanceDashboard {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PerformanceDashboard {
     pub fn new() -> Self {
         let initial_data = DashboardData {
@@ -494,7 +500,7 @@ impl PerformanceDashboard {
         let series = self
             .historical_metrics
             .entry(metric.to_string())
-            .or_insert_with(VecDeque::new);
+            .or_default();
 
         series.push_back(point.clone());
 

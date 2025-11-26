@@ -83,6 +83,12 @@ pub enum AlertSeverity {
     Critical,
 }
 
+impl Default for CorrelationManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CorrelationManager {
     pub fn new() -> Self {
         Self {
@@ -105,7 +111,7 @@ impl CorrelationManager {
         let returns = self
             .strategy_returns
             .entry(strategy_id.clone())
-            .or_insert_with(Vec::new);
+            .or_default();
         returns.push(strategy_return);
 
         // Keep only last 30 days

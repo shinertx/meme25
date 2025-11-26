@@ -147,7 +147,7 @@ impl BridgeInflow {
         // Simulate realistic bridge inflow patterns
         if (seed % 100) < 3 {
             // ~3% chance per event
-            let flow_amount = if (seed % 10) == 0 {
+            let flow_amount = if seed.is_multiple_of(10) {
                 // 10% chance of large whale flow
                 500_000.0 + ((seed % 1_500_000) as f64)
             } else {
@@ -174,7 +174,7 @@ impl BridgeInflow {
         let flows = self
             .bridge_flows
             .entry(token_address)
-            .or_insert_with(VecDeque::new);
+            .or_default();
         flows.push_back(flow);
 
         // Keep only last 24 hours of flows

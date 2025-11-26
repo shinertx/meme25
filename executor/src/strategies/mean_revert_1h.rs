@@ -61,7 +61,7 @@ impl Strategy for MeanRevert1h {
             let history = self
                 .price_history
                 .entry(tick.token_address.clone())
-                .or_insert_with(VecDeque::new);
+                .or_default();
 
             // Add new price
             history.push_back((tick.timestamp, tick.price_usd));

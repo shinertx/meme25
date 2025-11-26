@@ -83,111 +83,108 @@ impl Strategy for Momentum5m {
     }
 
     async fn on_event(&mut self, event: &MarketEvent) -> Result<StrategyAction> {
-        match event {
-            MarketEvent::Price(tick) => {
-                if let Some(allowed) = &self.allowed_tokens {
-                    if !allowed.contains(&tick.token_address) {
-                        return Ok(StrategyAction::Hold);
-                    }
-                }
-
-                let history = self
-                    .price_history
-                    .entry(tick.token_address.clone())
-                    .or_insert_with(|| VecDeque::with_capacity(self.lookback));
-
-                // Add new data point
-                history.push_back((tick.timestamp, tick.price_usd, tick.volume_usd_5m));
-
-                // Keep only lookback period
-                while history.len() > self.lookback {
-                    history.pop_front();
-                }
-
-                // Need full history for signal
-                if history.len() < self.lookback {
+        if let MarketEvent::Price(tick) = event {
+            if let Some(allowed) = &self.allowed_tokens {
+                if !allowed.contains(&tick.token_address) {
                     return Ok(StrategyAction::Hold);
                 }
+            }
 
-                // Check for cooldown
-                if let Some(last_time) = self.last_signal.get(&tick.token_address) {
-                    if tick.timestamp.signed_duration_since(*last_time)
-                        < Duration::minutes(self.cooldown_minutes)
-                    {
-                        return Ok(StrategyAction::Hold);
-                    }
-                }
+            let history = self
+                .price_history
+                .entry(tick.token_address.clone())
+                .or_insert_with(|| VecDeque::with_capacity(self.lookback));
 
-                let oldest = match history.front() {
-                    Some(data) => data,
-                    None => return Ok(StrategyAction::Hold), // Not enough data
-                };
-                let newest = match history.back() {
-                    Some(data) => data,
-                    None => return Ok(StrategyAction::Hold), // Not enough data
-                };
+            // Add new data point
+            history.push_back((tick.timestamp, tick.price_usd, tick.volume_usd_5m));
 
-                let price_change = (newest.1 - oldest.1) / oldest.1;
-                let avg_volume: f64 =
-                    history.iter().map(|(_, _, v)| v).sum::<f64>() / history.len() as f64;
-                let current_vol_ratio = newest.2 / avg_volume;
+            // Keep only lookback period
+            while history.len() > self.lookback {
+                history.pop_front();
+            }
 
-                // Momentum signal: price increase + volume surge + regime gate
-                if price_change > self.price_change_threshold
-                    && current_vol_ratio > self.vol_multiplier
-                    && tick.liquidity_usd > self.min_liquidity_usd
-                    && regime_ok(&history, self.regime_sma_lookback)
+            // Need full history for signal
+            if history.len() < self.lookback {
+                return Ok(StrategyAction::Hold);
+            }
+
+            // Check for cooldown
+            if let Some(last_time) = self.last_signal.get(&tick.token_address) {
+                if tick.timestamp.signed_duration_since(*last_time)
+                    < Duration::minutes(self.cooldown_minutes)
                 {
-                    // Minimum liquidity check
-
-                    info!(
-                        strategy = self.id(),
-                        token = %tick.token_address,
-                        price_change = format!("{:.2}%", price_change * 100.0),
-                        volume_ratio = format!("{:.2}x", current_vol_ratio),
-                        "MOMENTUM BUY signal detected"
-                    );
-
-                    self.last_signal
-                        .insert(tick.token_address.clone(), tick.timestamp);
-
-                    // Dynamic confidence based on signal strength
-                    let confidence = (0.5
-                        + (price_change / self.price_change_threshold * 0.25)
-                        + (current_vol_ratio / self.vol_multiplier * 0.25))
-                        .min(0.95);
-
-                    let symbol_suffix: String = tick.token_address.chars().take(6).collect();
-                    let order = OrderDetails {
-                        token_address: tick.token_address.clone(),
-                        symbol: format!("MEME_{}", symbol_suffix),
-                        suggested_size_usd: 40.0, // Tighter base; RiskManager can scale
-                        confidence,
-                        side: Side::Long,
-                        strategy_metadata: HashMap::from([
-                            ("price_change".to_string(), serde_json::json!(price_change)),
-                            (
-                                "volume_ratio".to_string(),
-                                serde_json::json!(current_vol_ratio),
-                            ),
-                            (
-                                "liquidity".to_string(),
-                                serde_json::json!(tick.liquidity_usd),
-                            ),
-                        ]),
-                        risk_metrics: RiskMetrics {
-                            position_size_pct: 0.02,                        // 2% of portfolio
-                            stop_loss_price: Some(tick.price_usd * 0.97),   // 3% stop loss
-                            take_profit_price: Some(tick.price_usd * 1.06), // 6% take profit
-                            max_slippage_bps: 50,
-                            time_limit_seconds: Some(300), // 5 minute execution window
-                        },
-                    };
-
-                    return Ok(StrategyAction::Execute(order));
+                    return Ok(StrategyAction::Hold);
                 }
             }
-            _ => {}
+
+            let oldest = match history.front() {
+                Some(data) => data,
+                None => return Ok(StrategyAction::Hold), // Not enough data
+            };
+            let newest = match history.back() {
+                Some(data) => data,
+                None => return Ok(StrategyAction::Hold), // Not enough data
+            };
+
+            let price_change = (newest.1 - oldest.1) / oldest.1;
+            let avg_volume: f64 =
+                history.iter().map(|(_, _, v)| v).sum::<f64>() / history.len() as f64;
+            let current_vol_ratio = newest.2 / avg_volume;
+
+            // Momentum signal: price increase + volume surge + regime gate
+            if price_change > self.price_change_threshold
+                && current_vol_ratio > self.vol_multiplier
+                && tick.liquidity_usd > self.min_liquidity_usd
+                && regime_ok(history, self.regime_sma_lookback)
+            {
+                // Minimum liquidity check
+
+                info!(
+                    strategy = self.id(),
+                    token = %tick.token_address,
+                    price_change = format!("{:.2}%", price_change * 100.0),
+                    volume_ratio = format!("{:.2}x", current_vol_ratio),
+                    "MOMENTUM BUY signal detected"
+                );
+
+                self.last_signal
+                    .insert(tick.token_address.clone(), tick.timestamp);
+
+                // Dynamic confidence based on signal strength
+                let confidence = (0.5
+                    + (price_change / self.price_change_threshold * 0.25)
+                    + (current_vol_ratio / self.vol_multiplier * 0.25))
+                    .min(0.95);
+
+                let symbol_suffix: String = tick.token_address.chars().take(6).collect();
+                let order = OrderDetails {
+                    token_address: tick.token_address.clone(),
+                    symbol: format!("MEME_{}", symbol_suffix),
+                    suggested_size_usd: 40.0, // Tighter base; RiskManager can scale
+                    confidence,
+                    side: Side::Long,
+                    strategy_metadata: HashMap::from([
+                        ("price_change".to_string(), serde_json::json!(price_change)),
+                        (
+                            "volume_ratio".to_string(),
+                            serde_json::json!(current_vol_ratio),
+                        ),
+                        (
+                            "liquidity".to_string(),
+                            serde_json::json!(tick.liquidity_usd),
+                        ),
+                    ]),
+                    risk_metrics: RiskMetrics {
+                        position_size_pct: 0.02,                        // 2% of portfolio
+                        stop_loss_price: Some(tick.price_usd * 0.97),   // 3% stop loss
+                        take_profit_price: Some(tick.price_usd * 1.06), // 6% take profit
+                        max_slippage_bps: 50,
+                        time_limit_seconds: Some(300), // 5 minute execution window
+                    },
+                };
+
+                return Ok(StrategyAction::Execute(order));
+            }
         }
 
         Ok(StrategyAction::Hold)

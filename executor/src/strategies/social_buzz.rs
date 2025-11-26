@@ -74,7 +74,7 @@ impl Strategy for SocialBuzz {
                 let history = self
                     .mention_history
                     .entry(mention.token_address.clone())
-                    .or_insert_with(VecDeque::new);
+                    .or_default();
 
                 // Aggregate data
                 let data = MentionData {
