@@ -34,34 +34,46 @@ pub struct Config {
 
 impl Config {
     pub fn from_env() -> Result<Self, env::VarError> {
+        // Check if we're in paper trading mode (more lenient with missing vars)
+        let paper_mode = env::var("PAPER_TRADING_MODE")
+            .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
+            .unwrap_or(true);
+
+        // In paper mode, use defaults for missing API keys
+        let default_api_key = || {
+            if paper_mode {
+                Ok("PAPER_TRADING_PLACEHOLDER".to_string())
+            } else {
+                Err(env::VarError::NotPresent)
+            }
+        };
+
         Ok(Config {
             database_url: env::var("DATABASE_URL")?,
             redis_url: env::var("REDIS_URL")?,
-            solana_rpc_url: env::var("SOLANA_RPC_URL")?,
-            solana_ws_url: env::var("SOLANA_WS_URL")?,
-            helius_api_key: env::var("HELIUS_API_KEY")?,
-            jupiter_api_key: env::var("JUPITER_API_KEY")?,
-            pump_fun_api_key: env::var("PUMP_FUN_API_KEY")?,
+            solana_rpc_url: env::var("SOLANA_RPC_URL").unwrap_or_else(|_| "https://api.mainnet-beta.solana.com".to_string()),
+            solana_ws_url: env::var("SOLANA_WS_URL").unwrap_or_else(|_| "wss://api.mainnet-beta.solana.com".to_string()),
+            helius_api_key: env::var("HELIUS_API_KEY").or_else(|_| default_api_key())?,
+            jupiter_api_key: env::var("JUPITER_API_KEY").or_else(|_| default_api_key())?,
+            pump_fun_api_key: env::var("PUMP_FUN_API_KEY").or_else(|_| default_api_key())?,
             birdeye_api_key: env::var("BIRDEYE_API_KEY").ok(),
-            twitter_bearer_token: env::var("TWITTER_BEARER_TOKEN")?,
+            twitter_bearer_token: env::var("TWITTER_BEARER_TOKEN").or_else(|_| default_api_key())?,
             farcaster_api_key: env::var("FARCASTER_API_KEY").ok(),
-            solana_private_key: env::var("SOLANA_PRIVATE_KEY")?,
-            initial_capital_usd: env::var("INITIAL_CAPITAL")?.parse().unwrap_or(200.0),
-            max_portfolio_size_usd: env::var("MAX_PORTFOLIO_SIZE")?.parse().unwrap_or(100000.0),
-            max_position_size_percent: env::var("MAX_POSITION_SIZE")?.parse().unwrap_or(20.0),
-            max_daily_drawdown_percent: env::var("MAX_DAILY_DRAWDOWN")?.parse().unwrap_or(5.0),
-            portfolio_stop_loss_percent: env::var("PORTFOLIO_STOP_LOSS")?.parse().unwrap_or(15.0),
-            genetic_population_size: env::var("GENETIC_POPULATION_SIZE")?.parse().unwrap_or(20),
-            genetic_mutation_rate: env::var("GENETIC_MUTATION_RATE")?.parse().unwrap_or(0.1),
-            genetic_crossover_rate: env::var("GENETIC_CROSSOVER_RATE")?.parse().unwrap_or(0.7),
-            genetic_elitism_rate: env::var("GENETIC_ELITISM_RATE")?.parse().unwrap_or(0.2),
-            signer_url: env::var("SIGNER_URL")?,
-            jito_tip_lamports: env::var("JITO_TIP_LAMPORTS")?.parse().unwrap_or(100000),
-            max_slippage_percent: env::var("MAX_SLIPPAGE")?.parse().unwrap_or(2.0),
-            min_liquidity_usd: env::var("MIN_LIQUIDITY")?.parse().unwrap_or(10000.0),
-            target_annual_return_percent: env::var("TARGET_ANNUAL_RETURN")?
-                .parse()
-                .unwrap_or(500.0),
+            solana_private_key: env::var("SOLANA_PRIVATE_KEY").or_else(|_| default_api_key())?,
+            initial_capital_usd: env::var("INITIAL_CAPITAL").ok().and_then(|v| v.parse().ok()).unwrap_or(200.0),
+            max_portfolio_size_usd: env::var("MAX_PORTFOLIO_SIZE").ok().and_then(|v| v.parse().ok()).unwrap_or(100000.0),
+            max_position_size_percent: env::var("MAX_POSITION_SIZE").ok().and_then(|v| v.parse().ok()).unwrap_or(20.0),
+            max_daily_drawdown_percent: env::var("MAX_DAILY_DRAWDOWN").ok().and_then(|v| v.parse().ok()).unwrap_or(5.0),
+            portfolio_stop_loss_percent: env::var("PORTFOLIO_STOP_LOSS").ok().and_then(|v| v.parse().ok()).unwrap_or(15.0),
+            genetic_population_size: env::var("GENETIC_POPULATION_SIZE").ok().and_then(|v| v.parse().ok()).unwrap_or(20),
+            genetic_mutation_rate: env::var("GENETIC_MUTATION_RATE").ok().and_then(|v| v.parse().ok()).unwrap_or(0.1),
+            genetic_crossover_rate: env::var("GENETIC_CROSSOVER_RATE").ok().and_then(|v| v.parse().ok()).unwrap_or(0.7),
+            genetic_elitism_rate: env::var("GENETIC_ELITISM_RATE").ok().and_then(|v| v.parse().ok()).unwrap_or(0.2),
+            signer_url: env::var("SIGNER_URL").unwrap_or_else(|_| "http://signer:8989".to_string()),
+            jito_tip_lamports: env::var("JITO_TIP_LAMPORTS").ok().and_then(|v| v.parse().ok()).unwrap_or(100000),
+            max_slippage_percent: env::var("MAX_SLIPPAGE").ok().and_then(|v| v.parse().ok()).unwrap_or(2.0),
+            min_liquidity_usd: env::var("MIN_LIQUIDITY").ok().and_then(|v| v.parse().ok()).unwrap_or(10000.0),
+            target_annual_return_percent: env::var("TARGET_ANNUAL_RETURN").ok().and_then(|v| v.parse().ok()).unwrap_or(500.0),
             metrics_port: env::var("METRICS_PORT").ok().and_then(|p| p.parse().ok()),
         })
     }

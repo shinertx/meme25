@@ -32,17 +32,30 @@ if [ ! -f ".env" ]; then
     exit 1
 fi
 
-# Check for wallet files
+# Check for wallet files (only strict check for live trading)
+PAPER_TRADING_MODE="${PAPER_TRADING_MODE:-true}"
+source .env 2>/dev/null || true
+
 if [ ! -f "my_wallet.json" ]; then
-    echo -e "${RED}Wallet file my_wallet.json not found${NC}"
-    echo "Please place your Solana wallet keypair file as my_wallet.json"
-    exit 1
+    if [ "$PAPER_TRADING_MODE" = "false" ]; then
+        echo -e "${RED}Wallet file my_wallet.json not found${NC}"
+        echo "Please place your Solana wallet keypair file as my_wallet.json"
+        exit 1
+    else
+        echo -e "${YELLOW}Wallet file my_wallet.json not found - creating dummy for paper trading${NC}"
+        echo '{"pubkey": "PAPER_TRADING_WALLET","secretKey": [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]}' > my_wallet.json
+    fi
 fi
 
 if [ ! -f "jito_auth_key.json" ]; then
-    echo -e "${RED}Jito auth keypair jito_auth_key.json not found${NC}"
-    echo "Please place your Jito auth keypair file as jito_auth_key.json"
-    exit 1
+    if [ "$PAPER_TRADING_MODE" = "false" ]; then
+        echo -e "${RED}Jito auth keypair jito_auth_key.json not found${NC}"
+        echo "Please place your Jito auth keypair file as jito_auth_key.json"
+        exit 1
+    else
+        echo -e "${YELLOW}Jito auth keypair jito_auth_key.json not found - creating dummy for paper trading${NC}"
+        echo '{"pubkey": "PAPER_TRADING_JITO_AUTH","secretKey": [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]}' > jito_auth_key.json
+    fi
 fi
 
 # Check Docker

@@ -45,7 +45,7 @@ test_redis() {
 
 # Test 3: PostgreSQL connectivity
 test_postgres() {
-    docker-compose exec -T postgres pg_isready -U meme25 | grep "accepting connections" > /dev/null
+    docker-compose exec -T postgres pg_isready -U postgres | grep "accepting connections" > /dev/null
 }
 
 # Test 4: Prometheus targets
@@ -90,7 +90,7 @@ test_redis_streams() {
 
 # Test 12: Database tables exist
 test_db_tables() {
-    docker-compose exec -T postgres psql -U meme25 -d meme25 -c "\dt" | grep -E "(trades|strategy_performance|capital_allocations|risk_events)" > /dev/null
+    docker-compose exec -T postgres psql -U postgres -d meme_snipe_v25 -c "\dt" | grep -E "(trades|strategy_performance|capital_allocations|risk_events)" > /dev/null
 }
 
 # Test 13: Environment variables loaded
