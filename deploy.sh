@@ -36,6 +36,19 @@ fi
 PAPER_TRADING_MODE="${PAPER_TRADING_MODE:-true}"
 source .env 2>/dev/null || true
 
+# Helper function to create dummy keypair JSON for paper trading
+create_dummy_keypair() {
+    local pubkey="$1"
+    local outfile="$2"
+    cat > "$outfile" << WALLET_EOF
+{
+  "_comment": "PAPER TRADING ONLY - NOT FOR LIVE USE",
+  "pubkey": "${pubkey}",
+  "secretKey": [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]
+}
+WALLET_EOF
+}
+
 if [ ! -f "my_wallet.json" ]; then
     if [ "$PAPER_TRADING_MODE" = "false" ]; then
         echo -e "${RED}Wallet file my_wallet.json not found${NC}"
@@ -43,7 +56,7 @@ if [ ! -f "my_wallet.json" ]; then
         exit 1
     else
         echo -e "${YELLOW}Wallet file my_wallet.json not found - creating dummy for paper trading${NC}"
-        echo '{"pubkey": "PAPER_TRADING_WALLET","secretKey": [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]}' > my_wallet.json
+        create_dummy_keypair "PAPER_TRADING_WALLET" "my_wallet.json"
     fi
 fi
 
@@ -54,7 +67,7 @@ if [ ! -f "jito_auth_key.json" ]; then
         exit 1
     else
         echo -e "${YELLOW}Jito auth keypair jito_auth_key.json not found - creating dummy for paper trading${NC}"
-        echo '{"pubkey": "PAPER_TRADING_JITO_AUTH","secretKey": [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]}' > jito_auth_key.json
+        create_dummy_keypair "PAPER_TRADING_JITO_AUTH" "jito_auth_key.json"
     fi
 fi
 

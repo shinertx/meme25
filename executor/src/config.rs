@@ -35,14 +35,15 @@ pub struct Config {
 impl Config {
     pub fn from_env() -> Result<Self, env::VarError> {
         // Check if we're in paper trading mode (more lenient with missing vars)
+        // Default to false for safety - paper mode must be explicitly enabled
         let paper_mode = env::var("PAPER_TRADING_MODE")
             .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
-            .unwrap_or(true);
+            .unwrap_or(false);
 
         // In paper mode, use defaults for missing API keys
         let default_api_key = || {
             if paper_mode {
-                Ok("PAPER_TRADING_PLACEHOLDER".to_string())
+                Ok("__PAPER_MODE_NO_REAL_KEY__".to_string())
             } else {
                 Err(env::VarError::NotPresent)
             }
@@ -108,6 +109,22 @@ impl Config {
 
         if let Some(port) = self.metrics_port {
             ensure!(port > 1024, "metrics_port must be > 1024");
+        }
+
+        // If not in paper mode, validate that we don't have placeholder credentials
+        let paper_mode = env::var("PAPER_TRADING_MODE")
+            .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
+            .unwrap_or(false);
+
+        if !paper_mode {
+            ensure!(
+                !self.solana_private_key.contains("__PAPER_MODE"),
+                "solana_private_key contains placeholder - set real key for live trading"
+            );
+            ensure!(
+                !self.helius_api_key.contains("__PAPER_MODE"),
+                "helius_api_key contains placeholder - set real key for live trading"
+            );
         }
 
         Ok(self)
