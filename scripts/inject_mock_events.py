@@ -217,7 +217,11 @@ def scenario_volume_surge(client, redis_url: str, token: str, count: int = 5):
             sell_volume=sell_volume
         )
         
-        msg_id = inject_event(client, "events:price", event)  # Volume events also go to events:price
+        # Note: Volume events are sent to events:price because the executor's
+        # MasterExecutor reads from events:price and dispatches to strategies
+        # based on the MarketEvent variant (Price, Volume, etc.) inside the Event wrapper.
+        # The stream name is for routing, not for filtering by event type.
+        msg_id = inject_event(client, "events:price", event)
         print(f"   📊 Volume spike {i+1}/{count}: ratio={spike_ratio:.1f}x, "
               f"buy=${buy_volume:,.0f}, msg_id={msg_id}")
         

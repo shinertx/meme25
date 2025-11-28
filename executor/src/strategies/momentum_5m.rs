@@ -8,6 +8,12 @@ use shared_models::{RiskMetrics, Side};
 use std::collections::{HashMap, HashSet, VecDeque};
 use tracing::{debug, info, warn};
 
+/// Debug mode relaxed thresholds for testing signal generation
+/// These are intentionally lower than production thresholds to force trade signals
+const DEBUG_MIN_PRICE_CHANGE: f64 = 0.01;        // 1% minimum price change (vs typical 5%)
+const DEBUG_MIN_VOL_RATIO: f64 = 1.0;            // Any volume increase (vs typical 2x)
+const DEBUG_MIN_LIQUIDITY_USD: f64 = 1000.0;     // Minimal liquidity (vs typical $50k)
+
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct Momentum5m {
     lookback: usize,
@@ -210,9 +216,9 @@ impl Strategy for Momentum5m {
                 
                 // In debug_mode, also fire on relaxed conditions for testing
                 let force_signal = debug_mode 
-                    && price_change > 0.01  // 1% minimum
-                    && current_vol_ratio > 1.0  // Any volume increase
-                    && tick.liquidity_usd > 1000.0;  // Minimal liquidity
+                    && price_change > DEBUG_MIN_PRICE_CHANGE
+                    && current_vol_ratio > DEBUG_MIN_VOL_RATIO
+                    && tick.liquidity_usd > DEBUG_MIN_LIQUIDITY_USD;
                 
                 if signal_fires || force_signal {
                     if force_signal && !signal_fires {
