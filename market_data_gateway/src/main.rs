@@ -333,14 +333,25 @@ async fn forward_price(conn: &mut MultiplexedConnection, tick: HeliusSlotTick) -
         timestamp: tick.timestamp,
     });
     // Wrap in top-level Event::Market
-    let event_wrapper = shared_models::Event::Market(evt);
+    let event_wrapper = shared_models::Event::Market(evt.clone());
     let payload = serde_json::to_string(&event_wrapper)?;
-    conn.xadd::<_, _, _, _, ()>(
+    let msg_id: String = conn.xadd(
         "events:price",
         "*",
         &[("type", "price"), ("data", payload.as_str())],
     )
     .await?;
+    
+    // [HEARTBEAT] Log successful Redis push for debugging
+    info!(
+        "[HEARTBEAT] ✅ Published price event to events:price | token={} price=${:.6} liq=${:.0} vol5m=${:.0} msg_id={}",
+        tick.address.chars().take(8).collect::<String>(),
+        tick.price_usd,
+        liq_usd,
+        vol5m_usd,
+        msg_id
+    );
+    
     Ok(())
 }
 
@@ -504,13 +515,23 @@ async fn poll_dexscreener_trending(conn: &mut MultiplexedConnection) -> Result<(
         });
         let event_wrapper = shared_models::Event::Market(evt);
         let payload = serde_json::to_string(&event_wrapper)?;
-        let _: () = conn
+        let msg_id: String = conn
             .xadd(
                 "events:price",
                 "*",
                 &[("type", "price"), ("data", payload.as_str())],
             )
             .await?;
+        
+        // [HEARTBEAT] Log trending token push
+        info!(
+            "[HEARTBEAT] 📈 Trending token pushed | token={} price=${:.6} liq=${:.0} vol24h=${:.0} msg_id={}",
+            addr.chars().take(8).collect::<String>(),
+            price,
+            liq,
+            vol_h,
+            msg_id
+        );
     }
     Ok(())
 }
@@ -646,13 +667,23 @@ async fn poll_dexscreener_newpairs(conn: &mut MultiplexedConnection) -> Result<(
         });
         let event_wrapper = shared_models::Event::Market(evt);
         let payload = serde_json::to_string(&event_wrapper)?;
-        let _: () = conn
+        let msg_id: String = conn
             .xadd(
                 "events:price",
                 "*",
                 &[("type", "price"), ("data", payload.as_str())],
             )
             .await?;
+        
+        // [HEARTBEAT] Log new pair push
+        info!(
+            "[HEARTBEAT] 🆕 New pair pushed | token={} price=${:.6} liq=${:.0} vol24h=${:.0} msg_id={}",
+            addr.chars().take(8).collect::<String>(),
+            price,
+            liq,
+            vol_h,
+            msg_id
+        );
     }
     Ok(())
 }
