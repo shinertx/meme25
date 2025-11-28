@@ -363,6 +363,57 @@ The system continuously evolves through:
 
 ## Troubleshooting
 
+### Diagnostic Tools
+
+MemeSnipe v25 includes diagnostic scripts to help troubleshoot silent failures and connectivity issues:
+
+#### 1. Infrastructure Smoke Test
+Validates basic connectivity to all infrastructure components:
+```bash
+# From outside containers (host mode)
+pip install redis psycopg2-binary requests
+python scripts/smoke_test.py --host-mode
+
+# From inside the network
+docker compose exec executor python /app/scripts/smoke_test.py
+```
+
+#### 2. Mock Event Injector
+Tests strategy signal generation with synthetic market events:
+```bash
+pip install redis
+
+# Test momentum strategy with price spike scenario
+python scripts/inject_mock_events.py --scenario momentum_spike
+
+# Test with all bullish signals combined
+python scripts/inject_mock_events.py --scenario perfect_trade
+
+# Custom event injection
+python scripts/inject_mock_events.py --custom --price 0.5 --volume 1000000 --liquidity 500000
+```
+
+After injecting events, check executor logs for signal activity:
+```bash
+docker compose logs -f executor | grep -E "(MOMENTUM|signal|action)"
+```
+
+#### 3. Transaction Simulation Validator
+Validates RPC connectivity and transaction infrastructure:
+```bash
+pip install requests
+python scripts/simulate_transaction.py
+
+# With custom RPC URL
+python scripts/simulate_transaction.py --rpc-url https://mainnet.helius-rpc.com/?api-key=YOUR_KEY
+```
+
+#### 4. Debug Mode for Strategies
+Enable debug mode in Momentum5m strategy to see detailed signal analysis:
+1. Set `debug_mode: true` in strategy params (via portfolio_manager)
+2. Or set environment variable to enable debugging
+3. Watch executor logs for `[DEBUG] 📊 Signal analysis` messages
+
 ### Common Issues
 
 1. **Services won't start**:
@@ -387,6 +438,13 @@ The system continuously evolves through:
    - Check VM resources: `htop`
    - Monitor Redis memory: `docker stats`
    - Review strategy allocation weights
+
+5. **No trades firing** (Silent Bot):
+   - Run smoke test to verify connectivity
+   - Check Redis stream lengths: `docker compose exec redis redis-cli XLEN events:price`
+   - Inject mock events and watch for strategy signals
+   - Enable debug_mode on strategies to see why signals aren't triggering
+   - Look for `[HEARTBEAT]` logs in market_data_gateway
 
 ### Emergency Procedures
 
