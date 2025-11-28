@@ -616,7 +616,28 @@ impl MasterExecutor {
             .with_context(|| format!("Failed to parse event payload on {}", stream_key))?;
 
         if let Event::Market(market_event) = event {
+            // [DEBUG] Log incoming event details
+            let event_type = market_event.get_type();
+            let token = market_event.token();
+            debug!(
+                stream = %stream_key,
+                event_type = ?event_type,
+                token = %token.chars().take(12).collect::<String>(),
+                "Processing market event"
+            );
+            
             let actions = self.trading_executor.process_event(&market_event).await?;
+            
+            // [DEBUG] Log action count
+            if !actions.is_empty() {
+                info!(
+                    stream = %stream_key,
+                    action_count = actions.len(),
+                    "Strategies generated {} actions",
+                    actions.len()
+                );
+            }
+            
             for (strategy_name, action) in actions {
                 self.handle_action(&strategy_name, &market_event, action)
                     .await?;
