@@ -1,0 +1,30 @@
+[package]
+name = "meme_snipe_monolith"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tokio = { version = "1.32", features = ["full"] }
+solana-sdk = "1.18"
+solana-client = "1.18"
+solana-program = "1.18"
+spl-token = "4.0"
+anyhow = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+dotenvy = "0.15"
+reqwest = { version = "0.11", features = ["json"] }
+bincode = "1.3"
+bs58 = "0.5"
+chrono = "0.4"
+futures = "0.3"
+
+[[bin]]
+name = "gen_key"
+path = "src/gen_key.rs"
+
+[[bin]]
+name = "meme_snipe_monolith"
+path = "src/main.rs"
